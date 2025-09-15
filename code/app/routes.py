@@ -1,6 +1,8 @@
 from fastapi import APIRouter
 from collections import Counter, defaultdict
 from pathlib import Path
+import re
+
 
 router = APIRouter()
 
@@ -202,6 +204,145 @@ async def consolidate_singletons(dry_run: bool = True):
         "estimated_tag_reduction": len(consolidation_map),
         "message": "Preview mode - no consolidations applied" if dry_run else "Singleton consolidation completed"
     }
+    
+@router.post("/api/inload/mine-memoir-content")
+async def mine_inload_memoir_content():
+    """Extract memoir-worthy content from _inload directories using Tesseract analysis"""
+    
+    inload_analysis = {
+        "high_priority_finds": [],
+        "memoir_candidates": [],
+        "recovery_narratives": [],
+        "temporal_content": [],
+        "character_development": [],
+        "low_priority": []
+    }
+    
+    files_processed = 0
+    
+    # Scan all _inload directories
+    for inload_path in VAULT_PATH.rglob("*inload*"):
+        if inload_path.is_dir():
+            for md_file in inload_path.rglob("*.md"):
+                try:
+                    content = md_file.read_text(encoding="utf-8")
+                    file_path_str = str(md_file.relative_to(VAULT_PATH))
+                    
+                    # Extract Tesseract coordinates
+                    coordinates = extract_tesseract_position(content)
+                    memoir_priority = calculate_memoir_priority(coordinates, content)
+                    
+                    file_info = {
+                        "file": file_path_str,
+                        "coordinates": coordinates,
+                        "memoir_priority": memoir_priority,
+                        "word_count": len(content.split()),
+                        "has_narrative_markers": check_narrative_markers(content),
+                        "temporal_indicators": extract_temporal_indicators(content),
+                        "emotional_intensity": assess_emotional_content(content)
+                    }
+                    
+                    # Categorize based on memoir value
+                    if memoir_priority > 0.7:
+                        inload_analysis["high_priority_finds"].append(file_info)
+                    elif coordinates["z_purpose"] == "tell-story" and coordinates["y_transmission"] == "narrative":
+                        inload_analysis["memoir_candidates"].append(file_info)
+                    elif coordinates["z_purpose"] == "help-addict" and memoir_priority > 0.4:
+                        inload_analysis["recovery_narratives"].append(file_info)
+                    elif file_info["temporal_indicators"]["has_dates"] or file_info["temporal_indicators"]["has_timeline"]:
+                        inload_analysis["temporal_content"].append(file_info)
+                    elif file_info["has_narrative_markers"]["character_references"] > 2:
+                        inload_analysis["character_development"].append(file_info)
+                    else:
+                        inload_analysis["low_priority"].append(file_info)
+                    
+                    files_processed += 1
+                    
+                except Exception as e:
+                    print(f"Error processing {md_file}: {e}")
+    
+    # Generate rescue recommendations
+    rescue_candidates = []
+    
+    # High priority files (immediate rescue)
+    for file_info in inload_analysis["high_priority_finds"]:
+        rescue_candidates.append({
+            "file": file_info["file"],
+            "priority": "immediate",
+            "reason": f"High memoir priority ({file_info['memoir_priority']:.2f})",
+            "suggested_destination": generate_tesseract_folder_path(
+                file_info["coordinates"]["z_purpose"],
+                file_info["coordinates"]["x_structure"]
+            )
+        })
+    
+    # Strong memoir candidates
+    for file_info in inload_analysis["memoir_candidates"]:
+        rescue_candidates.append({
+            "file": file_info["file"],
+            "priority": "high",
+            "reason": "Story-focused narrative content",
+            "suggested_destination": "memoir/narratives"
+        })
+    
+    # Recovery narratives worth preserving
+    for file_info in inload_analysis["recovery_narratives"]:
+        rescue_candidates.append({
+            "file": file_info["file"],
+            "priority": "medium",
+            "reason": "Recovery narrative with memoir potential",
+            "suggested_destination": "memoir/recovery-narratives"
+        })
+    
+    return {
+        "files_scanned": files_processed,
+        "inload_analysis": inload_analysis,
+        "rescue_recommendations": rescue_candidates,
+        "summary": {
+            "high_priority_finds": len(inload_analysis["high_priority_finds"]),
+            "memoir_candidates": len(inload_analysis["memoir_candidates"]),
+            "recovery_narratives": len(inload_analysis["recovery_narratives"]),
+            "total_rescue_worthy": len(rescue_candidates)
+        },
+        "next_steps": [
+            "Review high priority finds for immediate rescue",
+            "Evaluate memoir candidates for narrative value",
+            "Consider recovery narratives for memoir integration",
+            "Execute rescue operations in priority order"
+        ]
+    }
+
+def check_narrative_markers(content: str) -> dict:
+    """Check for narrative storytelling markers"""
+    markers = {
+        "first_person_narrative": content.lower().count("i ") + content.lower().count("me "),
+        "character_references": len(re.findall(r'\b[A-Z][a-z]+\b', content)),
+        "dialogue_markers": content.count('"') + content.count("'"),
+        "scene_setting": any(word in content.lower() for word in ["when ", "where ", "scene", "setting"]),
+        "emotional_language": sum(content.lower().count(word) for word in ["felt", "emotion", "remember", "experience"])
+    }
+    return markers
+
+def extract_temporal_indicators(content: str) -> dict:
+    """Extract temporal/chronological markers"""
+    indicators = {
+        "has_dates": bool(re.search(r'\b(19|20)\d{2}\b', content)),
+        "has_timeline": any(word in content.lower() for word in ["then", "next", "after", "before", "during"]),
+        "childhood_markers": any(word in content.lower() for word in ["childhood", "growing up", "as a kid"]),
+        "age_references": len(re.findall(r'\b\d{1,2}\s*years?\s*old\b', content.lower())),
+        "recovery_timeline": any(word in content.lower() for word in ["sobriety", "clean time", "relapse"])
+    }
+    return indicators
+
+def assess_emotional_content(content: str) -> float:
+    """Assess emotional intensity for memoir potential"""
+    emotional_words = ["pain", "joy", "fear", "love", "anger", "hope", "despair", "peace", "rage", "grief"]
+    intensity_words = ["overwhelming", "devastating", "incredible", "amazing", "terrible", "beautiful"]
+    
+    emotion_score = sum(content.lower().count(word) for word in emotional_words)
+    intensity_score = sum(content.lower().count(word) for word in intensity_words)
+    
+    return min(10.0, (emotion_score + intensity_score * 2) / max(len(content.split()) / 100, 1))
 
 @router.post("/api/tags/execute-singleton-consolidation")
 async def execute_singleton_consolidation(dry_run: bool = True):
