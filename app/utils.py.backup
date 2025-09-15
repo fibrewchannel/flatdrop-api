@@ -1,0 +1,408 @@
+import re
+import yaml
+import json
+import shutil
+from datetime import date, datetime
+from collections import Counter
+from pathlib import Path
+
+# ============================================================================
+# ENHANCED YAML GENERATION FOR OBSIDIAN COMPATIBILITY
+# ============================================================================
+
+def generate_obsidian_yaml(parsed_data):
+    """Generate Obsidian 1.4+ compatible YAML with multi-line arrays"""
+    yaml_lines = ["---"]
+    
+    # Handle aliases first (maintain order for consistency)
+    if 'aliases' in parsed_data and parsed_data['aliases']:
+        yaml_lines.append("aliases:")
+        for alias in parsed_data['aliases']:
+            yaml_lines.append(f'  - "{alias}"')
+    else:
+        yaml_lines.append("aliases: []")
+    
+    # Handle tags as multi-line array (REQUIRED for Obsidian property panel)
+    if 'tags' in parsed_data and parsed_data['tags']:
+        yaml_lines.append("tags:")
+        for tag in sorted(set(parsed_data['tags'])):
+            yaml_lines.append(f"  - {tag}")
+    else:
+        yaml_lines.append("tags: []")
+    
+    # Add other properties in alphabetical order
+    other_props = {k: v for k, v in parsed_data.items() if k not in ['tags', 'aliases']}
+    for key in sorted(other_props.keys()):
+        value = other_props[key]
+        if isinstance(value, str):
+            yaml_lines.append(f'{key}: "{value}"')
+        elif isinstance(value, (int, float, bool)):
+            yaml_lines.append(f'{key}: {value}')
+        elif isinstance(value, list):
+            if len(value) == 0:
+                yaml_lines.append(f'{key}: []')
+            else:
+                yaml_lines.append(f'{key}:')
+                for item in value:
+                    yaml_lines.append(f'  - "{item}"')
+        else:
+            yaml_lines.append(f'{key}: {value}')
+    
+    yaml_lines.append("---")
+    return "\n".join(yaml_lines)
+
+# ============================================================================
+# CRITICAL TAG CONSOLIDATION MAPPINGS
+# ============================================================================
+
+CRITICAL_CONSOLIDATIONS = {
+    # Flatline variations (high frequency)
+    "flatline-codex": "flatline",
+    "FLATLINE": "flatline",
+    "#flatline": "flatline",
+    "flatline-axis": "flatline",
+    
+    # Archetype standardization
+    "archetypes": "archetype",
+    "#archetypes": "archetype",
+    
+    # Protocol standardization
+    "protocols": "protocol",
+    "#protocols": "protocol",
+    "Protocols": "protocol",
+    
+    # Remove hash prefixes universally
+    "#summonings": "summonings",
+    "#tnos": "tnos",
+    "#narrative": "narrative",
+    "#ritual": "ritual",
+    "#reset": "reset",
+    "#flatline": "flatline",
+    
+    # Case normalization for color codes
+    "colors/0A0A23": "colors-0a0a23",
+    "0A0A23": "0a0a23",
+    "B9F5D8": "b9f5d8",
+    "8A91C5": "8a91c5",
+    "1C1B29": "1c1b29",
+    "80FFD3": "80ffd3",
+    "6AFFA6": "6affa6",
+    "47c6a6": "47c6a6",
+    "E4C45C": "e4c45c",
+    "8A3B12": "8a3b12",
+    "5D3D74": "5d3d74",
+    "9CBA3C": "9cba3c",
+    
+    # Consolidate memoir variations
+    "memoir-buffer": "memoir",
+    "memoir-as-resistance": "memoir",
+    "memoir-splinter": "memoir",
+    
+    # Recovery theme consolidation
+    "recovery-arcs": "recovery",
+    "recovery-philosophy": "recovery",
+    "recovery-narrative": "recovery",
+    
+    # Survivor theme consolidation
+    "survivor-myth": "survivor",
+    "survivor-redaction": "survivor",
+    "survivor-document": "survivor",
+    "survivor-record": "survivor",
+    
+    # Dispatch/dispatches consolidation
+    "dispatches": "dispatch",
+    
+    # Flatten path-like tags
+    "flatline-codex/draw-things": "draw-things",
+    "flatline-codex/draw-things/notes/liuliu-js-api": "liuliu-api",
+    "protocols/chaos-gen": "chaos-gen",
+    "dispatches/dispatches-002": "dispatches-002",
+    "archetypes/poisonous-friend": "archetype-poisonous-friend",
+    "summonings/burnt-bridge": "summoning-burnt-bridge",
+    "rituals/block-and-release": "ritual-block-release",
+    
+    # Casing fixes for special tags
+    "OurTodo": "ourtodo",
+    "DT_API_URL": "dt-api-url",
+    "API": "api",
+    "PixelatedEden": "pixelatededen",
+    "WeDoNotBlur": "wedonotblur",
+    "UX-research-brief": "ux-research-brief",
+    "AAshare": "aashare",
+    "Flatline": "flatline",
+    "Project": "project",
+    "PROJECT": "project",
+    "Flatline-Dashboard": "flatline-dashboard",
+    "Summonings": "summonings",
+    "Archetypes": "archetype",
+    "FLATLINE": "flatline",
+}
+
+# ============================================================================
+# ENHANCED VALIDATION FUNCTIONS
+# ============================================================================
+
+def validate_markdown(filename: str, content: str) -> list:
+    """Enhanced validation with Obsidian compatibility checks"""
+    errors = []
+    
+    if not filename.endswith(".md"):
+        errors.append("Filename must end with .md")
+    
+    if " " in filename:
+        errors.append("Filenames must not contain spaces (use underscores or hyphens).")
+    
+    if not content.strip().startswith("---"):
+        errors.append("Missing or malformed YAML frontmatter block at top of file.")
+    else:
+        # Validate YAML format
+        try:
+            yaml_content = parse_yaml_frontmatter(content)
+            if yaml_content and not validate_obsidian_properties(yaml_content):
+                errors.append("YAML properties not compatible with Obsidian format.")
+        except Exception as e:
+            errors.append(f"YAML parsing error: {str(e)}")
+    
+    return errors
+
+def validate_obsidian_properties(yaml_data):
+    """Validate that YAML properties follow Obsidian conventions"""
+    if not isinstance(yaml_data, dict):
+        return False
+    
+    # Check for required plural forms
+    singular_forms = ['tag', 'alias', 'cssclass']
+    for singular in singular_forms:
+        if singular in yaml_data:
+            return False  # Should be plural
+    
+    # Validate tag format
+    if 'tags' in yaml_data:
+        tags = yaml_data['tags']
+        if not isinstance(tags, list):
+            return False
+        for tag in tags:
+            if not isinstance(tag, str) or tag.strip() != tag:
+                return False
+    
+    return True
+
+# ============================================================================
+# FILE OPERATIONS
+# ============================================================================
+
+def write_markdown_file(directory: Path, filename: str, content: str) -> Path:
+    """Write markdown file with enhanced error handling"""
+    path = directory / filename
+    path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Create backup if file exists
+    if path.exists():
+        backup_path = path.with_suffix('.md.bak')
+        shutil.copy2(path, backup_path)
+    
+    path.write_text(content, encoding="utf-8")
+    return path.resolve()
+
+def parse_yaml_frontmatter(content: str):
+    """Enhanced YAML parsing with better error handling"""
+    if not content.startswith("---"):
+        return {}
+    
+    # Find the end of YAML block
+    lines = content.split('\n')
+    yaml_end = -1
+    for i, line in enumerate(lines[1:], 1):
+        if line.strip() == "---":
+            yaml_end = i
+            break
+    
+    if yaml_end == -1:
+        return {}
+    
+    yaml_block = '\n'.join(lines[1:yaml_end])
+    try:
+        return yaml.safe_load(yaml_block) or {}
+    except yaml.YAMLError as e:
+        raise ValueError(f"Invalid YAML: {e}")
+
+def fix_yaml_frontmatter(content: str) -> str:
+    """Create Obsidian-compatible YAML frontmatter"""
+    base_yaml = {
+        'aliases': [],
+        'tags': [],
+        'inload_date': date.today().isoformat()
+    }
+    
+    yaml_content = generate_obsidian_yaml(base_yaml)
+    return f"{yaml_content}\n\n{content}"
+
+# ============================================================================
+# TAG CONSOLIDATION FUNCTIONS
+# ============================================================================
+
+def apply_tag_consolidation(content: str, tag_mappings: dict) -> tuple[str, list]:
+    """Apply tag consolidation with change tracking"""
+    changes = []
+    updated_content = content
+    
+    # Handle YAML tags
+    if content.startswith("---"):
+        try:
+            yaml_data = parse_yaml_frontmatter(content)
+            if yaml_data and 'tags' in yaml_data:
+                original_tags = yaml_data['tags']
+                if isinstance(original_tags, list):
+                    updated_tags = []
+                    for tag in original_tags:
+                        new_tag = tag_mappings.get(tag, tag)
+                        if new_tag != tag:
+                            changes.append(f"YAML tag: {tag} -> {new_tag}")
+                        updated_tags.append(new_tag)
+                    
+                    yaml_data['tags'] = sorted(set(updated_tags))
+                    
+                    # Rebuild content with new YAML
+                    lines = content.split('\n')
+                    yaml_end = next(i for i, line in enumerate(lines[1:], 1) if line.strip() == "---")
+                    new_yaml = generate_obsidian_yaml(yaml_data)
+                    updated_content = new_yaml + '\n' + '\n'.join(lines[yaml_end + 1:])
+        except Exception as e:
+            changes.append(f"YAML processing error: {e}")
+    
+    # Handle inline tags
+    inline_pattern = re.compile(r"(?<!\w)#([\w/-]+)")
+    def replace_inline(match):
+        tag = match.group(1)
+        new_tag = tag_mappings.get(tag, tag)
+        if new_tag != tag:
+            changes.append(f"Inline tag: #{tag} -> #{new_tag}")
+        return f"#{new_tag}"
+    
+    updated_content = inline_pattern.sub(replace_inline, updated_content)
+    
+    return updated_content, changes
+
+def extract_all_tags(file_path: Path) -> list:
+    """Extract all tags (YAML and inline) from a markdown file"""
+    try:
+        content = file_path.read_text(encoding="utf-8")
+        tags = []
+        
+        # Extract YAML tags
+        yaml_data = parse_yaml_frontmatter(content)
+        if yaml_data and 'tags' in yaml_data:
+            yaml_tags = yaml_data['tags']
+            if isinstance(yaml_tags, list):
+                tags.extend(yaml_tags)
+        
+        # Extract inline tags
+        inline_pattern = re.compile(r"(?<!\w)#([\w/-]+)")
+        inline_tags = inline_pattern.findall(content)
+        tags.extend(inline_tags)
+        
+        return tags
+    except Exception:
+        return []
+
+def analyze_consolidation_opportunities(tag_counter: Counter) -> dict:
+    """Analyze tags for consolidation opportunities"""
+    suggestions = {
+        "case_variations": [],
+        "hash_prefixed": [],
+        "path_like": [],
+        "plural_singular": [],
+        "high_frequency": []
+    }
+    
+    tags = list(tag_counter.keys())
+    
+    # Find case variations
+    tag_lower_map = {}
+    for tag in tags:
+        lower = tag.lower()
+        if lower in tag_lower_map:
+            suggestions["case_variations"].append({
+                "variants": [tag_lower_map[lower], tag],
+                "counts": [tag_counter[tag_lower_map[lower]], tag_counter[tag]]
+            })
+        else:
+            tag_lower_map[lower] = tag
+    
+    # Find hash-prefixed tags
+    for tag in tags:
+        if tag.startswith('#'):
+            base_tag = tag[1:]
+            if base_tag in tag_counter:
+                suggestions["hash_prefixed"].append({
+                    "hash_tag": tag,
+                    "base_tag": base_tag,
+                    "counts": [tag_counter[tag], tag_counter[base_tag]]
+                })
+    
+    # Find path-like tags
+    for tag in tags:
+        if '/' in tag:
+            suggestions["path_like"].append({
+                "tag": tag,
+                "count": tag_counter[tag],
+                "suggested": tag.split('/')[-1]  # Use last part
+            })
+    
+    # Find plural/singular pairs
+    for tag in tags:
+        if tag.endswith('s') and tag[:-1] in tag_counter:
+            suggestions["plural_singular"].append({
+                "plural": tag,
+                "singular": tag[:-1],
+                "counts": [tag_counter[tag], tag_counter[tag[:-1]]]
+            })
+    
+    # High frequency tags that might need splitting
+    high_freq = tag_counter.most_common(20)
+    suggestions["high_frequency"] = [
+        {"tag": tag, "count": count}
+        for tag, count in high_freq
+        if count > 100
+    ]
+    
+    return suggestions
+
+def create_backup_snapshot(vault_path: Path) -> Path:
+    """Create a timestamped backup of the entire vault"""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = vault_path.parent / f"flatline_backup_{timestamp}"
+    
+    # Copy entire vault
+    shutil.copytree(vault_path, backup_path)
+    
+    # Create manifest
+    md_files = list(vault_path.rglob("*.md"))
+    manifest = {
+        "backup_date": timestamp,
+        "source_path": str(vault_path),
+        "file_count": len(md_files),
+        "total_size": sum(f.stat().st_size for f in vault_path.rglob("*") if f.is_file()),
+        "md_files": [str(f.relative_to(vault_path)) for f in md_files[:100]]  # Sample for manifest
+    }
+    
+    with open(backup_path / "backup_manifest.json", "w") as f:
+        json.dump(manifest, f, indent=2)
+    
+    return backup_path
+
+# ============================================================================
+# LEGACY FUNCTION COMPATIBILITY (Keep existing API working)
+# ============================================================================
+
+def autofix_markdown(content: str) -> str:
+    """Legacy function - now uses Obsidian-compatible format"""
+    return fix_yaml_frontmatter(content)
+
+def validate_markdown_sop(filename: str, content: str) -> dict:
+    """Legacy function - enhanced with Obsidian compatibility"""
+    errors = validate_markdown(filename, content)
+    return {
+        "status": "valid" if not errors else "invalid",
+        "errors": errors
+    }

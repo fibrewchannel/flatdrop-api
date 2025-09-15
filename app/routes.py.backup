@@ -1,0 +1,557 @@
+from fastapi import APIRouter, Request, HTTPException, Query
+from fastapi.responses import JSONResponse
+from app.schemas import UploadPayload, ValidationPayload
+from app.utils import (
+    validate_markdown, write_markdown_file, parse_yaml_frontmatter,
+    fix_yaml_frontmatter, generate_obsidian_yaml, apply_tag_consolidation,
+    extract_all_tags, analyze_consolidation_opportunities, create_backup_snapshot,
+    CRITICAL_CONSOLIDATIONS
+)
+from pathlib import Path
+from datetime import datetime
+from collections import Counter
+import os
+import re
+import yaml
+import json
+
+router = APIRouter()
+
+VAULT_PATH = Path("/Users/rickshangle/Vaults/flatline-codex")
+UPLOAD_DIR = VAULT_PATH / "_inload/docs"
+TAG_PATTERN = re.compile(r"(?<!\w)#([\w/-]+)")
+
+# Load tag map from file (if exists)
+TAG_MAP_PATH = Path("tag_map.yaml")
+tag_map = {}
+if TAG_MAP_PATH.exists():
+    try:
+        with open(TAG_MAP_PATH, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+            if isinstance(data, dict):
+                tag_map = data.get("map", {})
+    except Exception as e:
+        print(f"[ERROR] Failed to load tag_map.yaml: {e}")
+
+def align_tags(text: str, updated_tags: list[str]) -> str:
+    """Apply tag alignment using current tag map"""
+    def repl(m):
+        tag = m.group(1)
+        new_tag = tag_map.get(tag, tag)
+        if tag != new_tag:
+            updated_tags.append({"from": tag, "to": new_tag})
+        return f"#{new_tag}"
+    return TAG_PATTERN.sub(repl, text)
+
+# ============================================================================
+# ORIGINAL ENDPOINTS (Enhanced)
+# ============================================================================
+
+@router.post("/upload")
+async def upload_file(payload: UploadPayload, request: Request, autofix: bool = Query(False)):
+    """Enhanced upload with Obsidian-compatible YAML generation"""
+    filename = payload.filename.strip()
+    content = payload.content
+    updated_tags = []
+
+    # Autofix: YAML and tag alignment
+    if autofix:
+        if not content.startswith("---"):
+            content = fix_yaml_frontmatter(content)
+
+        try:
+            parsed_yaml = parse_yaml_frontmatter(content)
+        except Exception:
+            parsed_yaml = {}
+
+        if not isinstance(parsed_yaml, dict):
+            parsed_yaml = {}
+
+        # Apply tag consolidations
+        tags = parsed_yaml.get("tags", [])
+        if isinstance(tags, list):
+            fixed_tags = []
+            for tag in tags:
+                new_tag = tag_map.get(tag, tag)
+                if tag != new_tag:
+                    updated_tags.append({"from": tag, "to": new_tag})
+                fixed_tags.append(new_tag)
+            parsed_yaml["tags"] = sorted(set(fixed_tags))
+
+        # Add inload date
+        parsed_yaml["inload_date"] = datetime.utcnow().date().isoformat()
+        
+        # Generate Obsidian-compatible YAML
+        new_yaml = generate_obsidian_yaml(parsed_yaml)
+        content_body = content.split("---", 2)[-1].split("\n", 1)[-1] if "---" in content else content
+        content = f"{new_yaml}\n{content_body}"
+
+        # Replace inline tags
+        content = align_tags(content, updated_tags)
+
+    # Validate
+    errors = validate_markdown(filename, content)
+    if errors:
+        return JSONResponse(status_code=400, content={
+            "status": "rejected",
+            "reason": "SOP validation failed.",
+            "errors": errors
+        })
+
+    # Write file
+    try:
+        final_path = write_markdown_file(UPLOAD_DIR, filename, content)
+        response = {
+            "status": "success",
+            "path": str(final_path)
+        }
+        if updated_tags:
+            response["tags_updated"] = updated_tags
+        return response
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/validate")
+async def validate_file(payload: ValidationPayload):
+    """Enhanced validation with Obsidian compatibility checks"""
+    filename = payload.filename.strip()
+    content = payload.content
+    errors = validate_markdown(filename, content)
+    if errors:
+        return {"status": "invalid", "errors": errors}
+    return {"status": "valid"}
+
+@router.get("/status")
+async def status():
+    """Enhanced status with additional vault health checks"""
+    inload_exists = UPLOAD_DIR.exists() and UPLOAD_DIR.is_dir()
+    
+    # Count files and get basic stats
+    md_files = list(VAULT_PATH.rglob("*.md"))
+    total_size = sum(f.stat().st_size for f in VAULT_PATH.rglob("*") if f.is_file())
+    
+    return {
+        "status": "ok",
+        "inload_ready": inload_exists,
+        "upload_path": str(UPLOAD_DIR),
+        "vault_stats": {
+            "total_md_files": len(md_files),
+            "total_size_mb": round(total_size / 1024 / 1024, 2),
+            "vault_path": str(VAULT_PATH)
+        }
+    }
+
+@router.get("/browse")
+async def browse_directory(path: str = "/"):
+    """Browse vault directory structure"""
+    base = VAULT_PATH.resolve()
+    target = (base / path.strip("/")).resolve()
+
+    if not str(target).startswith(str(base)):
+        raise HTTPException(status_code=403, detail="Invalid path")
+
+    if not target.exists() or not target.is_dir():
+        raise HTTPException(status_code=404, detail="Directory not found")
+
+    items = [{
+        "name": p.name,
+        "is_dir": p.is_dir(),
+        "size": p.stat().st_size if p.is_file() else None,
+        "modified": p.stat().st_mtime
+    } for p in sorted(target.iterdir()) if not p.name.startswith(".")]
+
+    return {"path": str(target), "contents": items}
+
+@router.get("/read")
+async def read_file(path: str):
+    """Read markdown file with enhanced metadata"""
+    target = (VAULT_PATH / path).resolve()
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="File not found.")
+    if not str(target).startswith(str(VAULT_PATH)):
+        raise HTTPException(status_code=403, detail="Access denied.")
+
+    content = target.read_text(encoding="utf-8")
+    
+    # Extract metadata
+    yaml_data = parse_yaml_frontmatter(content)
+    all_tags = extract_all_tags(target)
+    
+    return {
+        "path": str(target),
+        "content": content,
+        "metadata": {
+            "yaml_frontmatter": yaml_data,
+            "all_tags": all_tags,
+            "file_size": target.stat().st_size,
+            "modified": target.stat().st_mtime,
+            "obsidian_compatible": validate_obsidian_properties(yaml_data) if yaml_data else False
+        }
+    }
+
+# ============================================================================
+# NEW TAG MANAGEMENT ENDPOINTS
+# ============================================================================
+
+@router.get("/api/tags/audit")
+async def audit_tags():
+    """Comprehensive tag analysis with consolidation suggestions"""
+    tag_counter = Counter()
+    file_count = 0
+    error_count = 0
+    
+    # Collect all tags from all files
+    for md_file in VAULT_PATH.rglob("*.md"):
+        try:
+            tags = extract_all_tags(md_file)
+            tag_counter.update(tags)
+            file_count += 1
+        except Exception as e:
+            error_count += 1
+            print(f"Error processing {md_file}: {e}")
+    
+    # Analyze for consolidation opportunities
+    suggestions = analyze_consolidation_opportunities(tag_counter)
+    
+    return {
+        "summary": {
+            "total_tags": len(tag_counter),
+            "total_instances": sum(tag_counter.values()),
+            "files_processed": file_count,
+            "processing_errors": error_count
+        },
+        "top_50_tags": tag_counter.most_common(50),
+        "consolidation_suggestions": suggestions,
+        "critical_consolidations_available": len(CRITICAL_CONSOLIDATIONS)
+    }
+
+@router.post("/api/tags/consolidate")
+async def consolidate_tags(
+    mapping_file: str = None,
+    dry_run: bool = True,
+    backup: bool = True,
+    use_critical_mappings: bool = True
+):
+    """Apply tag consolidation mapping to entire vault"""
+    
+    # Create backup if requested
+    backup_path = None
+    if backup and not dry_run:
+        backup_path = create_backup_snapshot(VAULT_PATH)
+    
+    # Determine which mappings to use
+    if mapping_file:
+        # Load custom mapping file
+        try:
+            with open(mapping_file, 'r') as f:
+                custom_mappings = {}
+                for line in f:
+                    if line.startswith("|") and not "Existing Tag" in line and "---" not in line:
+                        parts = [p.strip() for p in line.strip().split("|")[1:-1]]
+                        if len(parts) == 3 and parts[0] and parts[2] and parts[0] != parts[2]:
+                            custom_mappings[parts[0]] = parts[2]
+            mappings = custom_mappings
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Error reading mapping file: {e}")
+    else:
+        mappings = CRITICAL_CONSOLIDATIONS if use_critical_mappings else {}
+    
+    if not mappings:
+        raise HTTPException(status_code=400, detail="No tag mappings provided")
+    
+    # Apply consolidations
+    results = []
+    total_changes = 0
+    
+    for md_file in VAULT_PATH.rglob("*.md"):
+        if ".tag_backups" in md_file.parts:
+            continue
+            
+        try:
+            original_content = md_file.read_text(encoding="utf-8")
+            updated_content, changes = apply_tag_consolidation(original_content, mappings)
+            
+            if changes:
+                file_result = {
+                    "file": str(md_file.relative_to(VAULT_PATH)),
+                    "changes": changes,
+                    "change_count": len(changes)
+                }
+                results.append(file_result)
+                total_changes += len(changes)
+                
+                if not dry_run:
+                    md_file.write_text(updated_content, encoding="utf-8")
+                    
+        except Exception as e:
+            results.append({
+                "file": str(md_file.relative_to(VAULT_PATH)),
+                "error": str(e),
+                "changes": []
+            })
+    
+    return {
+        "dry_run": dry_run,
+        "backup_created": backup_path is not None,
+        "backup_path": str(backup_path) if backup_path else None,
+        "mappings_applied": len(mappings),
+        "files_affected": len([r for r in results if "error" not in r]),
+        "total_changes": total_changes,
+        "errors": len([r for r in results if "error" in r]),
+        "details": results[:50],  # Limit response size
+        "total_files_processed": len(results)
+    }
+
+@router.post("/api/tags/bulk-rename")
+async def bulk_rename_tag(
+    old_tag: str,
+    new_tag: str,
+    dry_run: bool = True,
+    backup: bool = True
+):
+    """Mass rename a single tag across the entire vault"""
+    
+    if backup and not dry_run:
+        backup_path = create_backup_snapshot(VAULT_PATH)
+    else:
+        backup_path = None
+    
+    # Apply single tag mapping
+    mappings = {old_tag: new_tag}
+    results = []
+    
+    for md_file in VAULT_PATH.rglob("*.md"):
+        if ".tag_backups" in md_file.parts:
+            continue
+            
+        try:
+            original_content = md_file.read_text(encoding="utf-8")
+            updated_content, changes = apply_tag_consolidation(original_content, mappings)
+            
+            if changes:
+                results.append({
+                    "file": str(md_file.relative_to(VAULT_PATH)),
+                    "changes": changes
+                })
+                
+                if not dry_run:
+                    md_file.write_text(updated_content, encoding="utf-8")
+                    
+        except Exception as e:
+            results.append({
+                "file": str(md_file.relative_to(VAULT_PATH)),
+                "error": str(e)
+            })
+    
+    return {
+        "dry_run": dry_run,
+        "old_tag": old_tag,
+        "new_tag": new_tag,
+        "backup_path": str(backup_path) if backup_path else None,
+        "files_affected": len([r for r in results if "error" not in r]),
+        "total_changes": sum(len(r.get("changes", [])) for r in results),
+        "details": results
+    }
+
+@router.get("/api/tags/frequency")
+async def tag_frequency():
+    """Get tag usage statistics and frequency analysis"""
+    tag_counter = Counter()
+    file_tags = {}  # Track which files use which tags
+    
+    for md_file in VAULT_PATH.rglob("*.md"):
+        try:
+            tags = extract_all_tags(md_file)
+            tag_counter.update(tags)
+            file_tags[str(md_file.relative_to(VAULT_PATH))] = tags
+        except Exception:
+            continue
+    
+    # Calculate statistics
+    total_tags = len(tag_counter)
+    total_instances = sum(tag_counter.values())
+    avg_tags_per_file = total_instances / len(file_tags) if file_tags else 0
+    
+    # Find orphaned tags (used only once)
+    orphaned_tags = [tag for tag, count in tag_counter.items() if count == 1]
+    
+    # Find highly used tags (top 10%)
+    top_10_percent_count = max(1, total_tags // 10)
+    highly_used = tag_counter.most_common(top_10_percent_count)
+    
+    return {
+        "statistics": {
+            "total_unique_tags": total_tags,
+            "total_tag_instances": total_instances,
+            "total_files": len(file_tags),
+            "avg_tags_per_file": round(avg_tags_per_file, 2),
+            "orphaned_tags_count": len(orphaned_tags)
+        },
+        "frequency_distribution": {
+            "top_20": tag_counter.most_common(20),
+            "bottom_20": tag_counter.most_common()[-20:],
+            "highly_used": highly_used,
+            "orphaned_sample": orphaned_tags[:20]
+        }
+    }
+
+@router.get("/api/tags/relationships")
+async def tag_relationships():
+    """Analyze tag co-occurrence patterns and relationships"""
+    from itertools import combinations
+    
+    tag_cooccurrence = Counter()
+    file_tag_sets = []
+    
+    # Collect tag combinations from each file
+    for md_file in VAULT_PATH.rglob("*.md"):
+        try:
+            tags = extract_all_tags(md_file)
+            if len(tags) > 1:
+                file_tag_sets.append(set(tags))
+                # Count all pairs of tags that appear together
+                for tag1, tag2 in combinations(sorted(set(tags)), 2):
+                    tag_cooccurrence[(tag1, tag2)] += 1
+        except Exception:
+            continue
+    
+    # Find strongest relationships
+    strong_relationships = tag_cooccurrence.most_common(50)
+    
+    # Find tags that never appear with others (always solo)
+    all_tags = set()
+    for tags in file_tag_sets:
+        all_tags.update(tags)
+    
+    solo_tags = []
+    for tag in all_tags:
+        appears_with_others = any(tag in tags and len(tags) > 1 for tags in file_tag_sets)
+        if not appears_with_others:
+            solo_tags.append(tag)
+    
+    return {
+        "analysis": {
+            "total_tag_pairs": len(tag_cooccurrence),
+            "files_with_multiple_tags": len(file_tag_sets),
+            "solo_tags_count": len(solo_tags)
+        },
+        "strongest_relationships": [
+            {
+                "tag1": pair[0],
+                "tag2": pair[1],
+                "cooccurrence_count": count,
+                "relationship_strength": count
+            }
+            for pair, count in strong_relationships
+        ],
+        "solo_tags": solo_tags[:20],  # Sample of tags that never appear with others
+        "suggested_clusters": self._suggest_tag_clusters(strong_relationships)
+    }
+
+def _suggest_tag_clusters(relationships):
+    """Suggest tag clusters based on co-occurrence patterns"""
+    clusters = []
+    processed_tags = set()
+    
+    for (tag1, tag2), count in relationships[:20]:  # Top 20 relationships
+        if tag1 not in processed_tags and tag2 not in processed_tags:
+            cluster_tags = {tag1, tag2}
+            
+            # Find other tags that frequently appear with these
+            for (other_tag1, other_tag2), other_count in relationships:
+                if other_count >= count * 0.5:  # At least 50% as frequent
+                    if other_tag1 in cluster_tags:
+                        cluster_tags.add(other_tag2)
+                    elif other_tag2 in cluster_tags:
+                        cluster_tags.add(other_tag1)
+            
+            if len(cluster_tags) >= 2:
+                clusters.append({
+                    "cluster_tags": list(cluster_tags),
+                    "strength": count,
+                    "suggested_parent_tag": min(cluster_tags, key=len)  # Shortest tag as parent
+                })
+                processed_tags.update(cluster_tags)
+    
+    return clusters
+
+@router.post("/api/backup/create")
+async def create_emergency_backup():
+    """Create complete vault backup with metadata"""
+    try:
+        backup_path = create_backup_snapshot(VAULT_PATH)
+        
+        # Read the manifest for response
+        manifest_path = backup_path / "backup_manifest.json"
+        with open(manifest_path, 'r') as f:
+            manifest = json.load(f)
+        
+        return {
+            "status": "success",
+            "backup_path": str(backup_path),
+            "manifest": manifest
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Backup failed: {str(e)}")
+
+@router.get("/api/health/detailed")
+async def detailed_health_check():
+    """Comprehensive system health and vault status"""
+    try:
+        # Basic vault checks
+        vault_exists = VAULT_PATH.exists()
+        inload_exists = UPLOAD_DIR.exists()
+        
+        # Count different file types
+        md_files = list(VAULT_PATH.rglob("*.md")) if vault_exists else []
+        all_files = list(VAULT_PATH.rglob("*")) if vault_exists else []
+        
+        # Check for common issues
+        issues = []
+        if not vault_exists:
+            issues.append("Vault path does not exist")
+        if not inload_exists:
+            issues.append("Inload directory missing")
+        
+        # Sample some files for YAML validation
+        yaml_issues = 0
+        if md_files:
+            sample_files = md_files[:10]  # Check first 10 files
+            for md_file in sample_files:
+                try:
+                    content = md_file.read_text(encoding="utf-8")
+                    yaml_data = parse_yaml_frontmatter(content)
+                    if yaml_data and not validate_obsidian_properties(yaml_data):
+                        yaml_issues += 1
+                except Exception:
+                    yaml_issues += 1
+        
+        if yaml_issues > 0:
+            issues.append(f"YAML compatibility issues found in {yaml_issues} of {len(sample_files)} sampled files")
+        
+        return {
+            "status": "healthy" if not issues else "issues_detected",
+            "vault": {
+                "path": str(VAULT_PATH),
+                "exists": vault_exists,
+                "inload_ready": inload_exists,
+                "total_files": len(all_files),
+                "markdown_files": len(md_files),
+                "total_size_mb": round(sum(f.stat().st_size for f in all_files if f.is_file()) / 1024 / 1024, 2) if all_files else 0
+            },
+            "issues": issues,
+            "tag_system": {
+                "critical_mappings_available": len(CRITICAL_CONSOLIDATIONS),
+                "tag_map_loaded": len(tag_map) > 0
+            },
+            "recommendations": [
+                "Run tag audit to identify consolidation opportunities",
+                "Create backup before major tag operations",
+                "Validate YAML frontmatter for Obsidian compatibility"
+            ] if not issues else ["Resolve vault access issues first"]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Health check failed: {str(e)}")
+
+# Import missing function
+from app.utils import validate_obsidian_properties
