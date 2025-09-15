@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tesseract 4D vs Cynefin Framework</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+            background: linear-gradient(135deg, #0a0a23 0%, #1a1a2e 50%, #16213e 100%);
+            color: #e0e6ed;
+            min-height: 100vh;
+            overflow-x: auto;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin: 0 0 10px 0;
+            background: linear-gradient(45deg, #00d4ff, #ff6b6b, #4ecdc4);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            font-size: 1.1em;
+            opacity: 0.8;
+            font-style: italic;
+        }
+
+        .frameworks-container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+
+        .framework-box {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 20px;
+            padding: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .framework-box::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #00d4ff, #4ecdc4);
+        }
+
+        .framework-title {
+            font-size: 1.8em;
+            margin-bottom: 20px;
+            color: #00d4ff;
+            font-weight: bold;
+        }
+
+        .cynefin-domains {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .domain {
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            font-weight: bold;
+            border: 2px solid;
+            transition: all 0.3s ease;
+        }
+
+        .domain:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 5px 15px rgba(0, 212, 255, 0.3);
+        }
+
+        .obvious { background: rgba(76, 175, 80, 0.2); border-color: #4caf50; }
+        .complicated { background: rgba(255, 193, 7, 0.2); border-color: #ffc107; }
+        .complex { background: rgba(156, 39, 176, 0.2); border-color: #9c27b0; }
+        .chaotic { background: rgba(244, 67, 54, 0.2); border-color: #f44336; }
+        .confused { background: rgba(158, 158, 158, 0.2); border-color: #9e9e9e; }
+
+        .tesseract-dimensions {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .dimension {
+            padding: 15px;
+            border-radius: 10px;
+            border: 2px solid;
+            transition: all 0.3s ease;
+        }
+
+        .dimension:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 5px 15px rgba(255, 107, 107, 0.3);
+        }
+
+        .x-structure { background: rgba(0, 212, 255, 0.2); border-color: #00d4ff; }
+        .y-transmission { background: rgba(255, 107, 107, 0.2); border-color: #ff6b6b; }
+        .z-purpose { background: rgba(78, 205, 196, 0.2); border-color: #4ecdc4; }
+        .w-terrain { background: rgba(255, 193, 7, 0.2); border-color: #ffc107; }
+
+        .dimension-title {
+            font-weight: bold;
+            margin-bottom: 8px;
+            font-size: 1.1em;
+        }
+
+        .dimension-examples {
+            font-size: 0.9em;
+            opacity: 0.8;
+            line-height: 1.4;
+        }
+
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin: 40px 0;
+        }
+
+        .comparison-item {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 25px;
+            border-left: 4px solid;
+        }
+
+        .cynefin-item { border-left-color: #00d4ff; }
+        .tesseract-item { border-left-color: #ff6b6b; }
+
+        .comparison-title {
+            font-size: 1.3em;
+            margin-bottom: 15px;
+            font-weight: bold;
+        }
+
+        .example-section {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 20px;
+            padding: 30px;
+            margin: 40px 0;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+        }
+
+        .example-title {
+            font-size: 1.5em;
+            margin-bottom: 20px;
+            color: #4ecdc4;
+            font-weight: bold;
+        }
+
+        .coordinate-display {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 10px;
+            padding: 15px;
+            font-family: 'SF Mono', monospace;
+            border-left: 4px solid #ff6b6b;
+            margin: 15px 0;
+        }
+
+        .coordinate-line {
+            margin: 5px 0;
+            display: flex;
+            align-items: center;
+        }
+
+        .coordinate-key {
+            color: #00d4ff;
+            font-weight: bold;
+            min-width: 140px;
+        }
+
+        .coordinate-value {
+            color: #4ecdc4;
+        }
+
+        .fusion-section {
+            background: linear-gradient(45deg, rgba(0, 212, 255, 0.1), rgba(255, 107, 107, 0.1));
+            border-radius: 20px;
+            padding: 30px;
+            margin: 40px 0;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            text-align: center;
+        }
+
+        .fusion-title {
+            font-size: 2em;
+            margin-bottom: 20px;
+            background: linear-gradient(45deg, #00d4ff, #ff6b6b);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .key-insight {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            margin: 20px 0;
+            border-left: 4px solid #4ecdc4;
+        }
+
+        .workflow-arrow {
+            text-align: center;
+            font-size: 2em;
+            color: #ff6b6b;
+            margin: 20px 0;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.6; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.1); }
+        }
+
+        @media (max-width: 768px) {
+            .frameworks-container,
+            .comparison-grid,
+            .cynefin-domains,
+            .tesseract-dimensions {
+                grid-template-columns: 1fr;
+            }
+            
+            .header h1 {
+                font-size: 1.8em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Tesseract 4D vs. Cynefin Framework</h1>
+            <div class="subtitle">How the Tesseract Extends Dave Snowden's Complexity Framework into Memoir-Native Architecture</div>
+        </div>
+
+        <div class="frameworks-container">
+            <div class="framework-box">
+                <div class="framework-title">Dave Snowden's Cynefin</div>
+                <p><strong>Purpose:</strong> Situational decision-making in complex environments</p>
+                <div class="cynefin-domains">
+                    <div class="domain obvious">Obvious<br><small>Best practices</small></div>
+                    <div class="domain complicated">Complicated<br><small>Good practices</small></div>
+                    <div class="domain complex">Complex<br><small>Emergent practices</small></div>
+                    <div class="domain chaotic">Chaotic<br><small>Novel practices</small></div>
+                </div>
+                <div class="domain confused" style="margin: 10px auto; width: 60%;">Confused<br><small>Unclear domain</small></div>
+                <p><em>Asks: "What kind of problem is this?"</em></p>
+            </div>
+
+            <div class="framework-box">
+                <div class="framework-title">Rick's Tesseract 4D</div>
+                <p><strong>Purpose:</strong> Personal meaning organization for memoir production</p>
+                <div class="tesseract-dimensions">
+                    <div class="dimension x-structure">
+                        <div class="dimension-title">X: Structure</div>
+                        <div class="dimension-examples">archetype, protocol, shadowcast, expansion, summoning</div>
+                    </div>
+                    <div class="dimension y-transmission">
+                        <div class="dimension-title">Y: Transmission</div>
+                        <div class="dimension-examples">narrative, text, image, tarot, invocation</div>
+                    </div>
+                    <div class="dimension z-purpose">
+                        <div class="dimension-title">Z: Purpose</div>
+                        <div class="dimension-examples">tell-story, help-addict, prevent-death, financial-amends, help-world</div>
+                    </div>
+                    <div class="dimension w-terrain">
+                        <div class="dimension-title">W: Cognitive Terrain</div>
+                        <div class="dimension-examples">obvious, complicated, complex, chaotic, confused</div>
+                    </div>
+                </div>
+                <p><em>Asks: "What kind of problem is this, for what purpose, transmitted how, and structured as what?"</em></p>
+            </div>
+        </div>
+
+        <div class="fusion-section">
+            <div class="fusion-title">The Genius Fusion</div>
+            <p>Cynefin provides the <strong>cognitive GPS</strong> (W-axis of Tesseract)</p>
+            <div class="workflow-arrow">↓</div>
+            <p>Tesseract provides the <strong>meaning architecture</strong> to build something beautiful from wherever that GPS locates you</p>
+        </div>
+
+        <div class="example-section">
+            <div class="example-title">Practical Example: Multi-Crisis Mapping</div>
+            <p><strong>Raw Experience:</strong> "I'm terrified about homelessness, working on recovery, trying to write, medical crisis happening"</p>
+            
+            <div class="comparison-grid">
+                <div class="comparison-item cynefin-item">
+                    <div class="comparison-title">Cynefin Response</div>
+                    <p>"Complex/Chaotic domain - probe and respond"</p>
+                    <p><em>Provides situational awareness but no structural guidance</em></p>
+                </div>
+                
+                <div class="comparison-item tesseract-item">
+                    <div class="comparison-title">Tesseract Coordinates</div>
+                    <div class="coordinate-display">
+                        <div class="coordinate-line">
+                            <span class="coordinate-key">Housing Crisis:</span>
+                            <span class="coordinate-value">protocol:narrative:prevent-death:complex</span>
+                        </div>
+                        <div class="coordinate-line">
+                            <span class="coordinate-key">Recovery Work:</span>
+                            <span class="coordinate-value">protocol:invocation:help-addict:chaotic</span>
+                        </div>
+                        <div class="coordinate-line">
+                            <span class="coordinate-key">Memoir Writing:</span>
+                            <span class="coordinate-value">summoning:narrative:tell-story:complex</span>
+                        </div>
+                        <div class="coordinate-line">
+                            <span class="coordinate-key">Medical Crisis:</span>
+                            <span class="coordinate-value">archetype:narrative:prevent-death:chaotic</span>
+                        </div>
+                    </div>
+                    <p><em>Provides actionable structure for each aspect of the experience</em></p>
+                </div>
+            </div>
+        </div>
+
+        <div class="key-insight">
+            <h3>Key Insight: Complementary, Not Competing</h3>
+            <p><strong>Cynefin:</strong> "This is chaotic terrain - act first, then sense"</p>
+            <p><strong>Tesseract:</strong> "This chaotic experience coordinates as protocol:invocation:help-addict:chaotic - use recovery protocols, invoke them verbally, this serves helping other addicts, acknowledge the chaos"</p>
+        </div>
+
+        <div class="key-insight">
+            <h3>Revolutionary Impact for Memoir Production</h3>
+            <p>This fusion creates a <strong>complexity-aware narrative architecture</strong> where emotional authenticity is preserved through Cynefin terrain mapping while structural coherence is maintained through 3D meaning organization. The result: A year of chaotic documentation becomes a navigable 4D map of lived experience that serves both daily survival and creative production.</p>
+        </div>
+
+        <div class="key-insight">
+            <h3>The Mage Dave Connection</h3>
+            <p>The "mage-dave" archetype bridges this perfectly - Snowden's complexity mastery becomes a <strong>summoning structure</strong> in Rick's personal mythology. His framework provides the cognitive terrain mapping, while the Tesseract provides the meaning-organization architecture that turns complexity into memoir.</p>
+        </div>
+    </div>
+</body>
+</html>
