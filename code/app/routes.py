@@ -27,6 +27,663 @@ from app.utils import (
 # TESSERACT 4D COORDINATE SYSTEM ENDPOINTS
 # ============================================================================
 
+@router.post("/api/tags/consolidate")
+async def consolidate_tesseract_redundant_tags(dry_run: bool = True):
+    """Consolidate tags that are redundant with Tesseract coordinates"""
+    
+    # Define Tesseract redundant tags based on your analysis
+    TESSERACT_REDUNDANT_MAPPINGS = {
+        # Flatline system redundancies
+        "flatline-codex/flatline": "REMOVE_SYSTEM_REDUNDANT",
+        "flatline": "REMOVE_SYSTEM_REDUNDANT",
+        
+        # X-axis structure redundancies
+        "protocol": "REMOVE_X_AXIS_REDUNDANT",
+        "summonings": "REMOVE_X_AXIS_REDUNDANT",
+        "shadowcast": "REMOVE_X_AXIS_REDUNDANT",
+        "archetype": "REMOVE_X_AXIS_REDUNDANT",
+        
+        # Z-axis purpose redundancies
+        "recovery": "REMOVE_Z_AXIS_REDUNDANT",
+        "memoir": "REMOVE_Z_AXIS_REDUNDANT",
+        "survival": "REMOVE_Z_AXIS_REDUNDANT",
+        
+        # Y-axis transmission redundancies
+        "narrative": "REMOVE_Y_AXIS_REDUNDANT"
+    }
+    
+    files_processed = 0
+    tags_removed = 0
+    changes_made = []
+    
+    for md_file in VAULT_PATH.rglob("*.md"):
+        try:
+            content = md_file.read_text(encoding="utf-8")
+            updated_content, file_changes = apply_tag_consolidation(content, TESSERACT_REDUNDANT_MAPPINGS)
+            
+            if file_changes and not dry_run:
+                md_file.write_text(updated_content, encoding="utf-8")
+                
+            files_processed += 1
+            tags_removed += len(file_changes)
+            changes_made.extend(file_changes)
+            
+        except Exception as e:
+            print(f"Error processing {md_file}: {e}")
+    
+    return {
+        "dry_run": dry_run,
+        "files_processed": files_processed,
+        "estimated_tags_removed": tags_removed,
+        "sample_changes": changes_made[:20],
+        "total_changes": len(changes_made),
+        "message": "Preview mode - no files changed" if dry_run else "Tags consolidated successfully"
+    }
+    
+@router.post("/api/tags/consolidate-singletons")
+async def consolidate_singletons(dry_run: bool = True):
+    """Consolidate singleton tags into established tags for semantic compression"""
+    
+    # Get current tag counts
+    tag_counter = Counter()
+    for md_file in VAULT_PATH.rglob("*.md"):
+        try:
+            tags = extract_all_tags(md_file)
+            tag_counter.update(tags)
+        except Exception:
+            continue
+    
+    # Identify singletons and established tags
+    singletons = [tag for tag, count in tag_counter.items() if count == 1]
+    established = {tag: count for tag, count in tag_counter.items() if count > 3}
+    
+    # Define consolidation mappings
+    consolidation_map = {}
+    
+    # Recovery-related consolidations
+    recovery_singletons = [tag for tag in singletons if any(keyword in str(tag).lower()
+                          for keyword in ['step', 'resentment', 'amends', 'inventory', 'spiritual'])]
+    for tag in recovery_singletons:
+        if 'aa' in established:
+            consolidation_map[tag] = 'aa'
+        elif 'recovery' in established:
+            consolidation_map[tag] = 'recovery'
+    
+    # Emotional/psychological consolidations
+    emotional_singletons = [tag for tag in singletons if any(keyword in str(tag).lower()
+                           for keyword in ['rage', 'grief', 'authenticity', 'validation', 'burnout'])]
+    for tag in emotional_singletons:
+        if 'emotion' in established:
+            consolidation_map[tag] = 'emotion'
+        elif 'psych' in established:
+            consolidation_map[tag] = 'psych'
+    
+    # Technical/tool consolidations
+    tech_singletons = [tag for tag in singletons if any(keyword in str(tag).lower()
+                      for keyword in ['api', 'python', 'code', 'system', 'tech'])]
+    for tag in tech_singletons:
+        if 'obsidian' in established:
+            consolidation_map[tag] = 'obsidian'
+        elif 'ai' in established:
+            consolidation_map[tag] = 'ai'
+    
+    # Creative/artistic consolidations
+    creative_singletons = [tag for tag in singletons if any(keyword in str(tag).lower()
+                          for keyword in ['art', 'music', 'creative', 'design', 'aesthetic'])]
+    for tag in creative_singletons:
+        if 'aiart' in established:
+            consolidation_map[tag] = 'aiart'
+        elif 'creative' in established:
+            consolidation_map[tag] = 'creative'
+    
+    # Work/career consolidations
+    work_singletons = [tag for tag in singletons if any(keyword in str(tag).lower()
+                      for keyword in ['job', 'interview', 'resume', 'career', 'work'])]
+    for tag in work_singletons:
+        if 'resume' in established:
+            consolidation_map[tag] = 'resume'
+    
+    # Apply consolidations
+    files_processed = 0
+    consolidations_made = 0
+    changes_log = []
+    
+    for md_file in VAULT_PATH.rglob("*.md"):
+        try:
+            content = md_file.read_text(encoding="utf-8")
+            if content.startswith("---"):
+                yaml_data = parse_yaml_frontmatter(content)
+                if yaml_data and 'tags' in yaml_data:
+                    original_tags = yaml_data['tags']
+                    if isinstance(original_tags, list):
+                        updated_tags = []
+                        file_changes = []
+                        
+                        for tag in original_tags:
+                            if tag in consolidation_map:
+                                new_tag = consolidation_map[tag]
+                                updated_tags.append(new_tag)
+                                file_changes.append(f"CONSOLIDATED: {tag} -> {new_tag}")
+                                consolidations_made += 1
+                            else:
+                                updated_tags.append(tag)
+                        
+                        if file_changes:
+                            yaml_data['tags'] = sorted(set(updated_tags))
+                            changes_log.extend(file_changes)
+                            
+                            if not dry_run:
+                                lines = content.split('\n')
+                                yaml_end = next((i for i, line in enumerate(lines[1:], 1) if line.strip() == "---"), -1)
+                                if yaml_end > 0:
+                                    new_yaml = generate_obsidian_yaml(yaml_data)
+                                    updated_content = new_yaml + '\n' + '\n'.join(lines[yaml_end + 1:])
+                                    md_file.write_text(updated_content, encoding="utf-8")
+            
+            files_processed += 1
+            
+        except Exception as e:
+            print(f"Error processing {md_file}: {e}")
+    
+    return {
+        "dry_run": dry_run,
+        "files_processed": files_processed,
+        "total_singletons": len(singletons),
+        "consolidation_opportunities": len(consolidation_map),
+        "consolidations_made": consolidations_made,
+        "sample_consolidations": changes_log[:20],
+        "consolidation_groups": {
+            "recovery": len(recovery_singletons),
+            "emotional": len(emotional_singletons),
+            "technical": len(tech_singletons),
+            "creative": len(creative_singletons),
+            "work": len(work_singletons)
+        },
+        "estimated_tag_reduction": len(consolidation_map),
+        "message": "Preview mode - no consolidations applied" if dry_run else "Singleton consolidation completed"
+    }
+
+@router.post("/api/tags/execute-singleton-consolidation")
+async def execute_singleton_consolidation(dry_run: bool = True):
+    """Execute singleton consolidation with corrected therapeutic content mapping"""
+    
+    # Get current tag counts
+    tag_counter = Counter()
+    for md_file in VAULT_PATH.rglob("*.md"):
+        try:
+            tags = extract_all_tags(md_file)
+            tag_counter.update(tags)
+        except Exception:
+            continue
+    
+    # Identify singletons
+    singletons = [tag for tag, count in tag_counter.items() if count == 1]
+    
+    # Define corrected consolidation mappings
+    consolidation_map = {}
+    
+    for tag in singletons:
+        tag_str = str(tag).lower()
+        
+        # Therapeutic/DBT content - corrected mapping
+        if 'dbt' in tag_str or 'distress-tolerance' in tag_str or 'worksheet' in tag_str:
+            consolidation_map[tag] = 'dbt'
+        
+        # Recovery/AA content
+        elif any(keyword in tag_str for keyword in ['step', 'resentment', 'amends', 'inventory', 'spiritual-practice']):
+            consolidation_map[tag] = 'aa'
+        
+        # Emotional/psychological (non-DBT)
+        elif any(keyword in tag_str for keyword in ['rage', 'grief', 'authenticity', 'validation', 'burnout']):
+            consolidation_map[tag] = 'psych'
+        
+        # Technical/system content
+        elif any(keyword in tag_str for keyword in ['api', 'python', 'code', 'system', 'flatline-codex']):
+            consolidation_map[tag] = 'obsidian'
+        
+        # Creative/artistic content
+        elif any(keyword in tag_str for keyword in ['art', 'music', 'creative', 'design', 'aesthetic']):
+            consolidation_map[tag] = 'aiart'
+        
+        # Work/career content (but not therapy)
+        elif any(keyword in tag_str for keyword in ['job', 'interview', 'resume', 'career', 'work']) and 'dbt' not in tag_str:
+            consolidation_map[tag] = 'resume'
+    
+    # Execute consolidations
+    files_processed = 0
+    consolidations_made = 0
+    changes_log = []
+    
+    for md_file in VAULT_PATH.rglob("*.md"):
+        try:
+            content = md_file.read_text(encoding="utf-8")
+            if content.startswith("---"):
+                yaml_data = parse_yaml_frontmatter(content)
+                if yaml_data and 'tags' in yaml_data:
+                    original_tags = yaml_data['tags']
+                    if isinstance(original_tags, list):
+                        updated_tags = []
+                        file_changes = []
+                        
+                        for tag in original_tags:
+                            if tag in consolidation_map:
+                                new_tag = consolidation_map[tag]
+                                updated_tags.append(new_tag)
+                                file_changes.append(f"CONSOLIDATED: {tag} -> {new_tag}")
+                                consolidations_made += 1
+                            else:
+                                updated_tags.append(tag)
+                        
+                        if file_changes:
+                            yaml_data['tags'] = sorted(set(updated_tags))
+                            changes_log.extend(file_changes)
+                            
+                            if not dry_run:
+                                lines = content.split('\n')
+                                yaml_end = next((i for i, line in enumerate(lines[1:], 1) if line.strip() == "---"), -1)
+                                if yaml_end > 0:
+                                    new_yaml = generate_obsidian_yaml(yaml_data)
+                                    updated_content = new_yaml + '\n' + '\n'.join(lines[yaml_end + 1:])
+                                    md_file.write_text(updated_content, encoding="utf-8")
+            
+            files_processed += 1
+            
+        except Exception as e:
+            print(f"Error processing {md_file}: {e}")
+    
+    return {
+        "dry_run": dry_run,
+        "files_processed": files_processed,
+        "consolidations_made": consolidations_made,
+        "sample_consolidations": changes_log[:20],
+        "estimated_tag_reduction": len(consolidation_map),
+        "message": "Preview mode" if dry_run else "Corrected singleton consolidation completed"
+    }
+
+@router.post("/api/tags/execute-technical-cleanup")
+async def execute_technical_cleanup(dry_run: bool = True):
+    """Execute technical cleanup: remove artifacts, standardize formats, fix case variants"""
+    
+    # Define technical cleanup mappings
+    TECHNICAL_REMOVALS = {
+        # Number tags
+        1: "REMOVE_NUMBER_TAG",
+        2: "REMOVE_NUMBER_TAG",
+        3: "REMOVE_NUMBER_TAG",
+        4: "REMOVE_NUMBER_TAG",
+        5: "REMOVE_NUMBER_TAG",
+        6: "REMOVE_NUMBER_TAG",
+        7: "REMOVE_NUMBER_TAG",
+        8: "REMOVE_NUMBER_TAG",
+        9: "REMOVE_NUMBER_TAG",
+        10: "REMOVE_NUMBER_TAG",
+        111: "REMOVE_NUMBER_TAG",
+        222: "REMOVE_NUMBER_TAG",
+        222129: "REMOVE_NUMBER_TAG",
+        888: "REMOVE_NUMBER_TAG",
+        
+        # Placeholder remnants
+        "REMOVE_SYSTEM_REDUNDANT": "REMOVE_PLACEHOLDER",
+        "REMOVE_X_AXIS_REDUNDANT": "REMOVE_PLACEHOLDER",
+        "REMOVE_Z_AXIS_REDUNDANT": "REMOVE_PLACEHOLDER",
+        
+        # Null values
+        "None": "REMOVE_NULL",
+        "null": "REMOVE_NULL"
+    }
+    
+    # Format standardizations
+    FORMAT_CONSOLIDATIONS = {
+        # Color codes - standardize to color-HEXCODE format
+        "colors/8A91C5": "color-8a91c5",
+        "colors/FFA86A": "color-ffa86a",
+        "colors/": "color-generic",
+        "b9f5d8": "color-b9f5d8",
+        "bc8d6b": "color-bc8d6b",
+        "colors-0a0a23": "color-0a0a23",
+        "colors-1a1a1a": "color-1a1a1a",
+        "colors-47c6a6": "color-47c6a6",
+        "colors-6e5ba0": "color-6e5ba0",
+        "colors-80ffd3": "color-80ffd3",
+        "colors-8c9b3e": "color-8c9b3e",
+        "colors-a34726": "color-a34726",
+        "colors-c1a837": "color-c1a837",
+        
+        # Case standardizations - choose lowercase
+        "UX": "ux",
+        "Codex": "codex",
+        "Tags": "tags",
+        "AI": "ai",
+        "LTR": "ltr"
+    }
+    
+    files_processed = 0
+    total_removals = 0
+    total_consolidations = 0
+    changes_made = []
+    
+    for md_file in VAULT_PATH.rglob("*.md"):
+        try:
+            content = md_file.read_text(encoding="utf-8")
+            if content.startswith("---"):
+                yaml_data = parse_yaml_frontmatter(content)
+                if yaml_data and 'tags' in yaml_data:
+                    original_tags = yaml_data['tags']
+                    if isinstance(original_tags, list):
+                        updated_tags = []
+                        file_changes = []
+                        
+                        for tag in original_tags:
+                            # Check for technical removals
+                            if tag in TECHNICAL_REMOVALS:
+                                file_changes.append(f"REMOVED: {tag} ({TECHNICAL_REMOVALS[tag]})")
+                                total_removals += 1
+                                continue  # Skip adding to updated_tags
+                                
+                            # Check for format consolidations
+                            elif tag in FORMAT_CONSOLIDATIONS:
+                                new_tag = FORMAT_CONSOLIDATIONS[tag]
+                                updated_tags.append(new_tag)
+                                file_changes.append(f"STANDARDIZED: {tag} -> {new_tag}")
+                                total_consolidations += 1
+                            else:
+                                updated_tags.append(tag)
+                        
+                        # Apply changes if any were made
+                        if file_changes:
+                            yaml_data['tags'] = sorted(set(updated_tags))
+                            changes_made.extend(file_changes)
+                            
+                            if not dry_run:
+                                lines = content.split('\n')
+                                yaml_end = next((i for i, line in enumerate(lines[1:], 1) if line.strip() == "---"), -1)
+                                if yaml_end > 0:
+                                    new_yaml = generate_obsidian_yaml(yaml_data)
+                                    updated_content = new_yaml + '\n' + '\n'.join(lines[yaml_end + 1:])
+                                    md_file.write_text(updated_content, encoding="utf-8")
+            
+            files_processed += 1
+            
+        except Exception as e:
+            print(f"Error processing {md_file}: {e}")
+    
+    return {
+        "dry_run": dry_run,
+        "files_processed": files_processed,
+        "technical_removals": total_removals,
+        "format_consolidations": total_consolidations,
+        "total_changes": len(changes_made),
+        "sample_changes": changes_made[:20],
+        "estimated_tag_reduction": total_removals + (total_consolidations // 2),
+        "message": "Preview mode - no files changed" if dry_run else "Technical cleanup completed successfully"
+    }
+
+@router.get("/api/tags/identify-reduction-candidates")
+async def identify_tag_reduction_candidates():
+    """Identify specific tags for reduction using strategic criteria"""
+    
+    # Get current tag counts
+    tag_counter = Counter()
+    for md_file in VAULT_PATH.rglob("*.md"):
+        try:
+            tags = extract_all_tags(md_file)
+            tag_counter.update(tags)
+        except Exception:
+            continue
+    
+    reduction_candidates = {
+        "technical_artifacts": [],
+        "format_consolidations": {},
+        "over_granular": [],
+        "case_variants": {},
+        "low_value_singletons": [],
+        "concept_duplicates": {}
+    }
+    
+    all_tags = list(tag_counter.keys())
+    
+    # 1. Technical artifacts (easy removals)
+    for tag in all_tags:
+        tag_str = str(tag)
+        if (isinstance(tag, int) or
+            tag in ['null', 'None', ''] or
+            tag_str.startswith('REMOVE_') or
+            tag_str.isdigit()):
+            reduction_candidates["technical_artifacts"].append({
+                "tag": tag,
+                "count": tag_counter[tag],
+                "reason": "technical_artifact"
+            })
+    
+    # 2. Format consolidations
+    # Color codes
+    color_tags = [tag for tag in all_tags if 'color' in str(tag).lower()]
+    if len(color_tags) > 1:
+        reduction_candidates["format_consolidations"]["color_codes"] = {
+            "tags": color_tags,
+            "suggestion": "Standardize to 'color-HEXCODE' format",
+            "potential_removals": len(color_tags) - 1
+        }
+    
+    # Ritual format variations
+    ritual_tags = [tag for tag in all_tags if 'ritual' in str(tag).lower()]
+    slash_rituals = [tag for tag in ritual_tags if '/' in str(tag)]
+    hyphen_rituals = [tag for tag in ritual_tags if '-' in str(tag) and '/' not in str(tag)]
+    if slash_rituals and hyphen_rituals:
+        reduction_candidates["format_consolidations"]["ritual_separators"] = {
+            "slash_format": slash_rituals,
+            "hyphen_format": hyphen_rituals,
+            "suggestion": "Standardize separator format",
+            "potential_removals": min(len(slash_rituals), len(hyphen_rituals))
+        }
+    
+    # 3. Case variants
+    case_groups = {}
+    for tag in all_tags:
+        if isinstance(tag, str):
+            lower_key = tag.lower()
+            if lower_key not in case_groups:
+                case_groups[lower_key] = []
+            case_groups[lower_key].append(tag)
+    
+    for key, variants in case_groups.items():
+        if len(variants) > 1:
+            total_instances = sum(tag_counter[tag] for tag in variants)
+            reduction_candidates["case_variants"][key] = {
+                "variants": variants,
+                "total_instances": total_instances,
+                "potential_removals": len(variants) - 1
+            }
+    
+    # 4. Over-granular tags (length and complexity)
+    for tag in all_tags:
+        tag_str = str(tag)
+        if (len(tag_str) > 50 or
+            (tag_counter[tag] == 1 and len(tag_str.split('-')) > 4) or
+            ' ' in tag_str and len(tag_str.split()) > 5):
+            reduction_candidates["over_granular"].append({
+                "tag": tag,
+                "count": tag_counter[tag],
+                "length": len(tag_str),
+                "reason": "overly_specific"
+            })
+    
+    # 5. Low-value singletons (appear once, not memoir-critical)
+    memoir_critical_patterns = ['nyx', 'mayo', 'rochester', 'draw-things', 'sponsor', 'therapy', 'aa', 'recovery']
+    for tag in all_tags:
+        if tag_counter[tag] == 1:
+            tag_str = str(tag).lower()
+            is_memoir_critical = any(pattern in tag_str for pattern in memoir_critical_patterns)
+            is_date = any(char.isdigit() for char in tag_str) and ('202' in tag_str or 'day' in tag_str)
+            
+            if not is_memoir_critical and not is_date and len(tag_str) > 3:
+                reduction_candidates["low_value_singletons"].append({
+                    "tag": tag,
+                    "reason": "singleton_not_memoir_critical"
+                })
+    
+    # Calculate total reduction potential
+    total_removals = (
+        len(reduction_candidates["technical_artifacts"]) +
+        sum(item.get("potential_removals", 0) for item in reduction_candidates["format_consolidations"].values()) +
+        sum(item.get("potential_removals", 0) for item in reduction_candidates["case_variants"].values()) +
+        len(reduction_candidates["over_granular"]) +
+        len(reduction_candidates["low_value_singletons"])
+    )
+    
+    return {
+        "current_total_tags": len(all_tags),
+        "target_reduction": len(all_tags) // 3,
+        "identified_reduction_potential": total_removals,
+        "reduction_categories": reduction_candidates,
+        "meets_target": total_removals >= len(all_tags) // 3,
+        "next_steps": [
+            "Review technical artifacts for immediate removal",
+            "Choose format standards (color codes, separators)",
+            "Consolidate case variants",
+            "Evaluate over-granular tags for memoir relevance",
+            "Remove low-value singletons"
+        ]
+    }
+
+@router.get("/api/tags/analyze-singletons")
+async def analyze_singleton_tags():
+    """Analyze singleton tags to categorize by value and identify cleanup opportunities"""
+    
+    # Get current tag counts
+    tag_counter = Counter()
+    for md_file in VAULT_PATH.rglob("*.md"):
+        try:
+            tags = extract_all_tags(md_file)
+            tag_counter.update(tags)
+        except Exception:
+            continue
+    
+    # Identify singletons (tags appearing exactly once)
+    singletons = [tag for tag, count in tag_counter.items() if count == 1]
+    
+    # Categorize singletons
+    categorized = {
+        "high_value_preservation": [],
+        "format_consolidation": [],
+        "cleanup_candidates": [],
+        "case_variants": [],
+        "technical_artifacts": []
+    }
+    
+    for tag in singletons:
+        tag_str = str(tag).lower()
+        
+        # High-value preservation candidates
+        if any(marker in tag_str for marker in ['nyx', 'mayo', 'rochester', 'draw-things', 'sponsor', 'therapy']):
+            categorized["high_value_preservation"].append(tag)
+        
+        # Case variants (same word, different case)
+        elif any(variant in [t.lower() for t in tag_counter.keys() if t != tag] for variant in [tag_str]):
+            categorized["case_variants"].append(tag)
+        
+        # Technical artifacts
+        elif tag in [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] or tag in ['null', 'None', '']:
+            categorized["technical_artifacts"].append(tag)
+        
+        # Format inconsistencies (color codes, slashes vs hyphens)
+        elif 'color' in tag_str or '/' in str(tag) or tag_str.startswith(('#', 'remove_')):
+            categorized["format_consolidation"].append(tag)
+        
+        # Over-granular or experimental tags
+        elif len(str(tag)) > 50 or '-' in str(tag) and len(str(tag).split('-')) > 5:
+            categorized["cleanup_candidates"].append(tag)
+        
+        # Default to preservation if unclear
+        else:
+            categorized["high_value_preservation"].append(tag)
+    
+    # Generate consolidation suggestions
+    consolidation_suggestions = []
+    
+    # Color code standardization
+    color_tags = [tag for tag in tag_counter.keys() if 'color' in str(tag).lower()]
+    if len(color_tags) > 1:
+        consolidation_suggestions.append({
+            "type": "color_standardization",
+            "tags": color_tags,
+            "suggestion": "Standardize to 'color-HEXCODE' format"
+        })
+    
+    # Case variant consolidation
+    case_groups = defaultdict(list)
+    for tag in tag_counter.keys():
+        case_groups[str(tag).lower()].append(tag)
+    
+    case_variants = {key: tags for key, tags in case_groups.items() if len(tags) > 1}
+    for key, variants in case_variants.items():
+        consolidation_suggestions.append({
+            "type": "case_consolidation",
+            "tags": variants,
+            "suggestion": f"Consolidate to single case format"
+        })
+    
+    return {
+        "total_singletons": len(singletons),
+        "categorized_singletons": {k: len(v) for k, v in categorized.items()},
+        "detailed_categories": categorized,
+        "consolidation_suggestions": consolidation_suggestions,
+        "estimated_cleanup_impact": {
+            "technical_artifacts": len(categorized["technical_artifacts"]),
+            "format_consolidations": len(categorized["format_consolidation"]),
+            "potential_removals": len(categorized["cleanup_candidates"])
+        }
+    }
+
+@router.post("/api/tags/cleanup-placeholders")
+async def cleanup_consolidation_artifacts(dry_run: bool = True):
+    """Remove placeholder tags left by consolidation process"""
+    
+    PLACEHOLDER_REMOVALS = [
+        "REMOVE_SYSTEM_REDUNDANT",
+        "REMOVE_X_AXIS_REDUNDANT",
+        "REMOVE_Y_AXIS_REDUNDANT",
+        "REMOVE_Z_AXIS_REDUNDANT"
+    ]
+    
+    files_processed = 0
+    tags_removed = 0
+    
+    for md_file in VAULT_PATH.rglob("*.md"):
+        try:
+            content = md_file.read_text(encoding="utf-8")
+            if content.startswith("---"):
+                yaml_data = parse_yaml_frontmatter(content)
+                if yaml_data and 'tags' in yaml_data:
+                    original_tags = yaml_data['tags']
+                    if isinstance(original_tags, list):
+                        # Remove placeholder tags completely
+                        cleaned_tags = [tag for tag in original_tags if tag not in PLACEHOLDER_REMOVALS]
+                        
+                        if len(cleaned_tags) != len(original_tags):
+                            yaml_data['tags'] = sorted(set(cleaned_tags))
+                            tags_removed += len(original_tags) - len(cleaned_tags)
+                            
+                            if not dry_run:
+                                lines = content.split('\n')
+                                yaml_end = next((i for i, line in enumerate(lines[1:], 1) if line.strip() == "---"), -1)
+                                if yaml_end > 0:
+                                    new_yaml = generate_obsidian_yaml(yaml_data)
+                                    updated_content = new_yaml + '\n' + '\n'.join(lines[yaml_end + 1:])
+                                    md_file.write_text(updated_content, encoding="utf-8")
+            
+            files_processed += 1
+            
+        except Exception as e:
+            print(f"Error processing {md_file}: {e}")
+    
+    return {
+        "dry_run": dry_run,
+        "files_processed": files_processed,
+        "placeholder_tags_removed": tags_removed,
+        "message": "Preview mode" if dry_run else "Placeholders cleaned successfully"
+    }
+
 @router.get("/api/tags/audit")
 async def audit_tags():
     """Comprehensive tag analysis"""
