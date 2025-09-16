@@ -1,0 +1,58 @@
+{
+  "timestamp": "2025-09-16",
+  "mode": "execute",
+  "operations": [
+    [
+      "cleanup_placeholders",
+      {
+        "dry_run": true,
+        "files_processed": 1255,
+        "placeholder_tags_removed": 0,
+        "message": "Preview mode"
+      }
+    ],
+    [
+      "technical_cleanup",
+      {
+        "dry_run": true,
+        "files_processed": 1255,
+        "technical_removals": 7,
+        "format_consolidations": 13,
+        "total_changes": 0,
+        "sample_changes": [],
+        "estimated_tag_reduction": 13,
+        "message": "Preview mode - no files changed"
+      }
+    ],
+    [
+      "tesseract_consolidate",
+      {
+        "dry_run": true,
+        "files_processed": 1257,
+        "estimated_tags_removed": 17,
+        "sample_changes": [
+          "YAML tag: protocol -> REMOVE_X_AXIS_REDUNDANT",
+          "YAML tag: summonings -> REMOVE_X_AXIS_REDUNDANT",
+          "YAML tag: archetype -> REMOVE_X_AXIS_REDUNDANT",
+          "YAML tag: narrative -> REMOVE_Y_AXIS_REDUNDANT",
+          "YAML tag: protocol -> REMOVE_X_AXIS_REDUNDANT",
+          "YAML tag: archetype -> REMOVE_X_AXIS_REDUNDANT",
+          "YAML tag: shadowcast -> REMOVE_X_AXIS_REDUNDANT",
+          "YAML tag: flatline-codex/flatline -> REMOVE_SYSTEM_REDUNDANT",
+          "YAML tag: summonings -> REMOVE_X_AXIS_REDUNDANT",
+          "YAML tag: flatline -> REMOVE_SYSTEM_REDUNDANT",
+          "YAML tag: flatline -> REMOVE_SYSTEM_REDUNDANT",
+          "YAML tag: flatline -> REMOVE_SYSTEM_REDUNDANT",
+          "YAML tag: flatline -> REMOVE_SYSTEM_REDUNDANT",
+          "YAML tag: flatline -> REMOVE_SYSTEM_REDUNDANT",
+          "YAML tag: flatline -> REMOVE_SYSTEM_REDUNDANT",
+          "YAML tag: flatline -> REMOVE_SYSTEM_REDUNDANT",
+          "YAML tag: flatline -> REMOVE_SYSTEM_REDUNDANT"
+        ],
+        "total_changes": 17,
+        "message": "Preview mode - no files changed"
+      }
+    ]
+  ],
+  "total_changes": 37
+}

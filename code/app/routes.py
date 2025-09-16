@@ -52,7 +52,243 @@ async def get_file_content(file_path: str):
         
     except Exception as e:
         return {"error": f"Error reading file: {str(e)}"}
+
+# Add these updates to your existing app/routes.py file
+
+# Update the TESSERACT_REDUNDANT_MAPPINGS to include missing coordinate-redundant tags
+TESSERACT_REDUNDANT_MAPPINGS = {
+    # Existing mappings...
+    "flatline-codex/flatline": "REMOVE_SYSTEM_REDUNDANT",
+    "flatline": "REMOVE_SYSTEM_REDUNDANT",
+    
+    # X-axis structure redundancies
+    "protocol": "REMOVE_X_AXIS_REDUNDANT",
+    "summonings": "REMOVE_X_AXIS_REDUNDANT",
+    "shadowcast": "REMOVE_X_AXIS_REDUNDANT",
+    "archetype": "REMOVE_X_AXIS_REDUNDANT",
+    
+    # MISSING TAGS DISCOVERED DURING CONSOLIDATION:
+    "ritual": "REMOVE_X_AXIS_REDUNDANT",     # 13 instances - X-axis structure
+    "chaos": "REMOVE_W_AXIS_REDUNDANT",      # 8 instances - W-axis terrain
+    "tarot": "REMOVE_Y_AXIS_REDUNDANT",      # 7 instances - Y-axis transmission
+    
+    # Z-axis purpose redundancies
+    "recovery": "REMOVE_Z_AXIS_REDUNDANT",
+    "memoir": "REMOVE_Z_AXIS_REDUNDANT",
+    "survival": "REMOVE_Z_AXIS_REDUNDANT",
+    
+    # Y-axis transmission redundancies
+    "narrative": "REMOVE_Y_AXIS_REDUNDANT"
+}
+
+# Enhanced TECHNICAL_REMOVALS for more complete cleanup
+TECHNICAL_REMOVALS = {
+    # Number tags (discovered in consolidation)
+    1: "REMOVE_NUMBER_TAG",
+    2: "REMOVE_NUMBER_TAG",
+    3: "REMOVE_NUMBER_TAG",
+    4: "REMOVE_NUMBER_TAG",
+    5: "REMOVE_NUMBER_TAG",
+    6: "REMOVE_NUMBER_TAG",
+    7: "REMOVE_NUMBER_TAG",
+    8: "REMOVE_NUMBER_TAG",
+    9: "REMOVE_NUMBER_TAG",
+    10: "REMOVE_NUMBER_TAG",
+    111: "REMOVE_NUMBER_TAG",
+    222: "REMOVE_NUMBER_TAG",
+    222129: "REMOVE_NUMBER_TAG",
+    320: "REMOVE_NUMBER_TAG",  # Discovered in final audit
+    102: "REMOVE_NUMBER_TAG",  # Discovered in final audit
+    220: "REMOVE_NUMBER_TAG",  # Discovered in final audit
+    
+    # Placeholder remnants
+    "REMOVE_SYSTEM_REDUNDANT": "REMOVE_PLACEHOLDER",
+    "REMOVE_X_AXIS_REDUNDANT": "REMOVE_PLACEHOLDER",
+    "REMOVE_Y_AXIS_REDUNDANT": "REMOVE_PLACEHOLDER",
+    "REMOVE_Z_AXIS_REDUNDANT": "REMOVE_PLACEHOLDER",
+    "REMOVE_W_AXIS_REDUNDANT": "REMOVE_PLACEHOLDER",
+    
+    # Null values
+    "None": "REMOVE_NULL",
+    "null": "REMOVE_NULL"
+}
+
+# Enhanced FORMAT_CONSOLIDATIONS with discovered variations
+FORMAT_CONSOLIDATIONS = {
+    # Format variations discovered during consolidation
+    "thread-dump": "threaddump",        # 15 instances → merge with threaddump (18)
+    "_import": "import",                # 14 instances → merge with import (18)
+    "ritual/ritual-nourishment": "ritual-nourishment",  # 10 instances
+    
+    # Color codes - standardize to color-HEXCODE format
+    "colors/8A91C5": "color-8a91c5",
+    "colors/FFA86A": "color-ffa86a",
+    "colors/": "color-generic",
+    "b9f5d8": "color-b9f5d8",
+    "bc8d6b": "color-bc8d6b",
+    "colors-0a0a23": "color-0a0a23",
+    "colors-1a1a1a": "color-1a1a1a",
+    "colors-47c6a6": "color-47c6a6",
+    "colors-6e5ba0": "color-6e5ba0",
+    "colors-80ffd3": "color-80ffd3",
+    "colors-8c9b3e": "color-8c9b3e",
+    "colors-a34726": "color-a34726",
+    "colors-c1a837": "color-c1a837",
+    
+    # Case standardizations
+    "UX": "ux",
+    "Codex": "codex",
+    "Tags": "tags",
+    "AI": "ai",
+    "LTR": "ltr"
+}
+
+# Add new endpoint for comprehensive final cleanup
+@router.post("/api/tags/final-consolidation-cleanup")
+async def final_consolidation_cleanup(dry_run: bool = True):
+    """
+    Comprehensive final cleanup targeting remaining issues discovered in consolidation
+    Combines missing coordinate mappings + format consolidations
+    """
+    
+    files_processed = 0
+    total_changes = 0
+    coordinate_removals = 0
+    format_consolidations = 0
+    changes_log = []
+    
+    # Combine all remaining cleanup mappings
+    final_cleanup_mappings = {
+        # Missing coordinate-redundant tags
+        "ritual": "",           # Remove completely
+        "chaos": "",            # Remove completely
+        "tarot": "",            # Remove completely
         
+        # Format consolidations
+        "thread-dump": "threaddump",
+        "_import": "import",
+        "ritual/ritual-nourishment": "ritual-nourishment",
+    }
+    
+    for md_file in VAULT_PATH.rglob("*.md"):
+        try:
+            content = md_file.read_text(encoding="utf-8")
+            if content.startswith("---"):
+                yaml_data = parse_yaml_frontmatter(content)
+                if yaml_data and 'tags' in yaml_data:
+                    original_tags = yaml_data['tags']
+                    if isinstance(original_tags, list):
+                        updated_tags = []
+                        file_changes = []
+                        
+                        for tag in original_tags:
+                            if tag in final_cleanup_mappings:
+                                new_value = final_cleanup_mappings[tag]
+                                if new_value == "":
+                                    # Remove tag completely
+                                    file_changes.append(f"REMOVED: {tag}")
+                                    coordinate_removals += 1
+                                else:
+                                    # Consolidate format
+                                    updated_tags.append(new_value)
+                                    file_changes.append(f"CONSOLIDATED: {tag} → {new_value}")
+                                    format_consolidations += 1
+                            else:
+                                updated_tags.append(tag)
+                        
+                        if file_changes:
+                            yaml_data['tags'] = sorted(set(updated_tags))
+                            changes_log.extend(file_changes)
+                            total_changes += len(file_changes)
+                            
+                            if not dry_run:
+                                lines = content.split('\n')
+                                yaml_end = next((i for i, line in enumerate(lines[1:], 1) if line.strip() == "---"), -1)
+                                if yaml_end > 0:
+                                    new_yaml = generate_obsidian_yaml(yaml_data)
+                                    updated_content = new_yaml + '\n' + '\n'.join(lines[yaml_end + 1:])
+                                    md_file.write_text(updated_content, encoding="utf-8")
+            
+            files_processed += 1
+            
+        except Exception as e:
+            print(f"Error processing {md_file}: {e}")
+    
+    return {
+        "dry_run": dry_run,
+        "files_processed": files_processed,
+        "coordinate_removals": coordinate_removals,
+        "format_consolidations": format_consolidations,
+        "total_changes": total_changes,
+        "sample_changes": changes_log[:20],
+        "estimated_tag_reduction": coordinate_removals + (format_consolidations // 2),
+        "message": "Preview mode - no files changed" if dry_run else "Final consolidation cleanup completed"
+    }
+
+# Add endpoint to verify consolidation completion
+@router.get("/api/tags/consolidation-status")
+async def check_consolidation_status():
+    """Check the current status of tag consolidation and identify remaining issues"""
+    
+    # Get current tag state
+    tag_counter = Counter()
+    for md_file in VAULT_PATH.rglob("*.md"):
+        try:
+            tags = extract_all_tags(md_file)
+            tag_counter.update(tags)
+        except Exception:
+            continue
+    
+    # Check for remaining consolidation targets
+    remaining_coordinate_redundant = []
+    remaining_format_issues = []
+    remaining_technical_artifacts = []
+    
+    coordinate_redundant_patterns = ["ritual", "chaos", "tarot", "protocol", "archetype", "narrative", "shadowcast"]
+    format_issue_patterns = ["thread-dump", "_import", "ritual/", "colors/"]
+    technical_artifact_patterns = [111, 222, 320, 102, 220, "REMOVE_"]
+    
+    for tag, count in tag_counter.items():
+        tag_str = str(tag)
+        
+        # Check coordinate redundancy
+        if any(pattern in tag_str for pattern in coordinate_redundant_patterns):
+            remaining_coordinate_redundant.append({"tag": tag, "count": count})
+        
+        # Check format issues
+        elif any(pattern in tag_str for pattern in format_issue_patterns):
+            remaining_format_issues.append({"tag": tag, "count": count})
+        
+        # Check technical artifacts
+        elif any(str(pattern) in tag_str for pattern in technical_artifact_patterns):
+            remaining_technical_artifacts.append({"tag": tag, "count": count})
+    
+    # Calculate consolidation completeness
+    total_remaining_issues = len(remaining_coordinate_redundant) + len(remaining_format_issues) + len(remaining_technical_artifacts)
+    consolidation_completeness = max(0, 100 - (total_remaining_issues * 2))  # Rough estimate
+    
+    return {
+        "current_tag_count": len(tag_counter),
+        "total_instances": sum(tag_counter.values()),
+        "consolidation_completeness_percent": round(consolidation_completeness, 1),
+        "remaining_issues": {
+            "coordinate_redundant": remaining_coordinate_redundant,
+            "format_inconsistencies": remaining_format_issues,
+            "technical_artifacts": remaining_technical_artifacts
+        },
+        "total_remaining_issues": total_remaining_issues,
+        "recommendations": [
+            "Run final-consolidation-cleanup to address remaining coordinate redundancy" if remaining_coordinate_redundant else None,
+            "Apply format standardization for remaining inconsistencies" if remaining_format_issues else None,
+            "Clean technical artifacts with execute-technical-cleanup" if remaining_technical_artifacts else None,
+            "Consolidation appears complete!" if total_remaining_issues == 0 else None
+        ],
+        "next_step": (
+            "POST /api/tags/final-consolidation-cleanup?dry_run=false" if total_remaining_issues > 0
+            else "Consolidation complete - system optimized"
+        )
+    }
+    
 @router.post("/api/tags/consolidate")
 async def consolidate_tesseract_redundant_tags(dry_run: bool = True):
     """Consolidate tags that are redundant with Tesseract coordinates"""
