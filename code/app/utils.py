@@ -140,18 +140,15 @@ def extract_tesseract_position(content: str) -> dict:
     # W-Axis: Cognitive Terrain Analysis (Cynefin-based)
     w_terrain = assess_cognitive_complexity(content)
     
-    corrected_coordinates = apply_coordinate_corrections(file_path, initial_coordinates)
-
-    # Create initial coordinates
-    initial_coordinates = {
-        "x_structure": x_structure,
-        "y_transmission": y_transmission,
-        "z_purpose": z_purpose,
-        "w_terrain": w_terrain,
-        "tesseract_key": f"{x_structure}:{y_transmission}:{z_purpose}:{w_terrain}"
+   initial_coordinates = {
+    "x_structure": x_structure,
+    "y_transmission": y_transmission,
+    "z_purpose": z_purpose,
+    "w_terrain": w_terrain,
+    "tesseract_key": f"{x_structure}:{y_transmission}:{z_purpose}:{w_terrain}"
     }
 
-    # Apply corrections and return
+    # THEN apply corrections and return
     return apply_coordinate_corrections(file_path, initial_coordinates)
 
 # Enhanced coordinate extraction rules for app/utils.py
