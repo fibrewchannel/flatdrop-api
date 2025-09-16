@@ -125,7 +125,7 @@ def generate_obsidian_yaml(parsed_data):
 # TESSERACT 4D COORDINATE SYSTEM - CORE FUNCTIONS
 # ============================================================================
 
-def extract_tesseract_position(content: str) -> dict:
+def extract_tesseract_position(content: str, file_path: str = "") -> dict:
     """Extract 4D Tesseract coordinates for any document"""
     
     # X-Axis: Structure/Archetype Analysis
@@ -140,7 +140,7 @@ def extract_tesseract_position(content: str) -> dict:
     # W-Axis: Cognitive Terrain Analysis (Cynefin-based)
     w_terrain = assess_cognitive_complexity(content)
     
-   initial_coordinates = {
+    initial_coordinates = {
     "x_structure": x_structure,
     "y_transmission": y_transmission,
     "z_purpose": z_purpose,
@@ -207,26 +207,6 @@ def apply_coordinate_corrections(file_path: str, initial_coords: dict) -> dict:
     
     return corrected
 
-
-def extract_tesseract_position(content: str, file_path: str = "") -> dict:
-    """
-    Enhanced extraction with correction rules applied
-    """
-    # ... existing extraction logic ...
-    
-    initial_coordinates = {
-        'x_structure': determine_structure(content, file_path),
-        'y_transmission': determine_transmission(content, file_path),
-        'z_purpose': determine_purpose(content, file_path),
-        'w_terrain': determine_terrain(content, file_path)
-    }
-    
-    initial_coordinates['tesseract_key'] = f"{initial_coordinates['x_structure']}:{initial_coordinates['y_transmission']}:{initial_coordinates['z_purpose']}:{initial_coordinates['w_terrain']}"
-    
-    # Apply learned corrections
-    corrected_coordinates = apply_coordinate_corrections(file_path, initial_coordinates)
-    
-    return corrected_coordinates
 
 # Enhanced purpose detection with job search priority
 def determine_purpose(content: str, file_path: str = "") -> str:
