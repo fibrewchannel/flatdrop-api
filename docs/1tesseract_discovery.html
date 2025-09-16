@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Discovery: Tesseract 4D Architecture</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+            background: linear-gradient(135deg, #0a0a23 0%, #1a1a2e 50%, #16213e 100%);
+            color: #e0e6ed;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .header h1 {
+            font-size: 2.2em;
+            margin: 0 0 10px 0;
+            background: linear-gradient(45deg, #00d4ff, #ff6b6b, #4ecdc4);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .subtitle {
+            font-size: 1em;
+            opacity: 0.8;
+            font-style: italic;
+        }
+
+        .dimensions-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 25px;
+            margin: 40px 0;
+        }
+
+        .dimension {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 15px;
+            padding: 25px;
+            border: 2px solid;
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .dimension::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+        }
+
+        .dimension:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+        }
+
+        .x-structure { 
+            border-color: #00d4ff; 
+        }
+        .x-structure::before { background: #00d4ff; }
+
+        .y-transmission { 
+            border-color: #ff6b6b; 
+        }
+        .y-transmission::before { background: #ff6b6b; }
+
+        .z-purpose { 
+            border-color: #4ecdc4; 
+        }
+        .z-purpose::before { background: #4ecdc4; }
+
+        .w-terrain { 
+            border-color: #ffc107; 
+        }
+        .w-terrain::before { background: #ffc107; }
+
+        .dimension-title {
+            font-size: 1.4em;
+            font-weight: bold;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+        }
+
+        .axis-label {
+            background: rgba(0, 0, 0, 0.4);
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 0.8em;
+            margin-right: 10px;
+            min-width: 25px;
+            text-align: center;
+        }
+
+        .dimension-desc {
+            margin-bottom: 15px;
+            line-height: 1.6;
+            opacity: 0.9;
+        }
+
+        .values-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .value-tag {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: all 0.2s ease;
+        }
+
+        .value-tag:hover {
+            background: rgba(255, 255, 255, 0.2);
+            transform: scale(1.05);
+        }
+
+        .insight-box {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 25px;
+            margin: 30px 0;
+            border-left: 4px solid #4ecdc4;
+        }
+
+        .insight-title {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #4ecdc4;
+            margin-bottom: 15px;
+        }
+
+        @media (max-width: 768px) {
+            .dimensions-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .header h1 {
+                font-size: 1.8em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>The Discovery: Tesseract 4D Architecture</h1>
+            <div class="subtitle">A 4-Dimensional Coordinate System for Organizing Lived Experience</div>
+        </div>
+
+        <div class="dimensions-grid">
+            <div class="dimension x-structure">
+                <div class="dimension-title">
+                    <span class="axis-label">X</span>
+                    Structure - How It Functions
+                </div>
+                <div class="dimension-desc">
+                    The functional architecture that determines how content operates within your experience.
+                </div>
+                <div class="values-list">
+                    <span class="value-tag">archetype</span>
+                    <span class="value-tag">protocol</span>
+                    <span class="value-tag">shadowcast</span>
+                    <span class="value-tag">expansion</span>
+                    <span class="value-tag">summoning</span>
+                </div>
+            </div>
+
+            <div class="dimension y-transmission">
+                <div class="dimension-title">
+                    <span class="axis-label">Y</span>
+                    Transmission - How It Communicates
+                </div>
+                <div class="dimension-desc">
+                    The medium through which meaning is conveyed and understanding is transmitted.
+                </div>
+                <div class="values-list">
+                    <span class="value-tag">narrative</span>
+                    <span class="value-tag">text</span>
+                    <span class="value-tag">image</span>
+                    <span class="value-tag">tarot</span>
+                    <span class="value-tag">invocation</span>
+                </div>
+            </div>
+
+            <div class="dimension z-purpose">
+                <div class="dimension-title">
+                    <span class="axis-label">Z</span>
+                    Purpose - Why It Exists
+                </div>
+                <div class="dimension-desc">
+                    Rick's five core life intents that give meaning and direction to all documented experience.
+                </div>
+                <div class="values-list">
+                    <span class="value-tag">tell-story</span>
+                    <span class="value-tag">help-addict</span>
+                    <span class="value-tag">prevent-death</span>
+                    <span class="value-tag">financial-amends</span>
+                    <span class="value-tag">help-world</span>
+                </div>
+            </div>
+
+            <div class="dimension w-terrain">
+                <div class="dimension-title">
+                    <span class="axis-label">W</span>
+                    Cognitive Terrain - Where It Lives
+                </div>
+                <div class="dimension-desc">
+                    Based on Cynefin framework - the mental/emotional complexity domain where content exists.
+                </div>
+                <div class="values-list">
+                    <span class="value-tag">obvious</span>
+                    <span class="value-tag">complicated</span>
+                    <span class="value-tag">complex</span>
+                    <span class="value-tag">chaotic</span>
+                    <span class="value-tag">confused</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="insight-box">
+            <div class="insight-title">Key Insight</div>
+            <p>This isn't just filing—it's a <strong>navigation system for consciousness</strong>. Every piece of content can be mapped across four dimensions of meaning: how it functions, how it communicates, why it matters, and what cognitive space it occupies.</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Practical Example: Multi-Crisis Mapping</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+            background: linear-gradient(135deg, #0a0a23 0%, #1a1a2e 50%, #16213e 100%);
+            color: #e0e6ed;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            padding: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .header h1 {
+            font-size: 2.2em;
+            margin: 0 0 10px 0;
+            background: linear-gradient(45deg, #00d4ff, #ff6b6b, #4ecdc4);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .scenario {
+            background: rgba(255, 193, 7, 0.1);
+            border-radius: 15px;
+            padding: 25px;
+            margin: 30px 0;
+            border: 2px solid #ffc107;
+            text-align: center;
+        }
+
+        .scenario-title {
+            font-size: 1.4em;
+            font-weight: bold;
+            color: #ffc107;
+            margin-bottom: 15px;
+        }
+
+        .scenario-text {
+            font-size: 1.1em;
+            font-style: italic;
+            line-height: 1.6;
+        }
+
+        .comparison-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin: 40px 0;
+        }
+
+        .comparison-item {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 25px;
+            border-left: 4px solid;
+        }
+
+        .cynefin-item { border-left-color: #00d4ff; }
+        .tesseract-item { border-left-color: #ff6b6b; }
+
+        .comparison-title {
+            font-size: 1.3em;
+            margin-bottom: 15px;
+            font-weight: bold;
+        }
+
+        .cynefin-title { color: #00d4ff; }
+        .tesseract-title { color: #ff6b6b; }
+
+        .coordinate-display {
+            background: rgba(0, 0, 0, 0.4);
+            border-radius: 10px;
+            padding: 20px;
+            font-family: 'SF Mono', monospace;
+            border: 1px solid rgba(255, 107, 107, 0.3);
+            margin: 20px 0;
+        }
+
+        .coordinate-line {
+            margin: 8px 0;
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .coordinate-key {
+            color: #00d4ff;
+            font-weight: bold;
+            min-width: 120px;
+            margin-right: 10px;
+        }
+
+        .coordinate-value {
+            color: #4ecdc4;
+            font-weight: 500;
+        }
+
+        .coordinate-separator {
+            color: #ff6b6b;
+            margin: 0 3px;
+        }
+
+        .insight-box {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            padding: 25px;
+            margin: 30px 0;
+            border-left: 4px solid #4ecdc4;
+        }
+
+        .insight-title {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #4ecdc4;
+            margin-bottom: 15px;
+        }
+
+        .key-difference {
+            background: linear-gradient(45deg, rgba(0, 212, 255, 0.1), rgba(255, 107, 107, 0.1));
+            border-radius: 15px;
+            padding: 25px;
+            margin: 30px 0;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .difference-title {
+            font-size: 1.4em;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 20px;
+            background: linear-gradient(45deg, #00d4ff, #ff6b6b);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .frameworks {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 20px 0;
+        }
+
+        .framework-quote {
+            flex: 1;
+            padding: 15px;
+            margin: 0 10px;
+            border-radius: 10px;
+            text-align: center;
+        }
+
+        .cynefin-quote {
+            background: rgba(0, 212, 255, 0.1);
+            border: 1px solid #00d4ff;
+        }
+
+        .tesseract-quote {
+            background: rgba(255, 107, 107, 0.1);
+            border: 1px solid #ff6b6b;
+        }
+
+        .vs-divider {
+            font-size: 1.5em;
+            color: #4ecdc4;
+            font-weight: bold;
+        }
+
+        @media (max-width: 768px) {
+            .comparison-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .header h1 {
+                font-size: 1.8em;
+            }
+
+            .coordinate-line {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+
+            .coordinate-key {
+                min-width: auto;
+                margin-bottom: 5px;
+            }
+
+            .frameworks {
+                flex-direction: column;
+            }
+
+            .framework-quote {
+                margin: 10px 0;
+            }
+
+            .vs-divider {
+                margin: 10px 0;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Practical Example: Multi-Crisis Mapping</h1>
+            <div class="subtitle">How Tesseract Coordinates Provide Actionable Structure</div>
+        </div>
+
+        <div class="scenario">
+            <div class="scenario-title">Raw Experience</div>
+            <div class="scenario-text">
+                "I'm terrified about homelessness, working on recovery, trying to write, medical crisis happening"
+            </div>
+        </div>
+
+        <div class="comparison-grid">
+            <div class="comparison-item cynefin-item">
+                <div class="comparison-title cynefin-title">Cynefin Response</div>
+                <p><strong>"Complex/Chaotic domain - probe and respond"</strong></p>
+                <p><em>Provides situational awareness but no structural guidance for meaning-making or action.</em></p>
+            </div>
+            
+            <div class="comparison-item tesseract-item">
+                <div class="comparison-title tesseract-title">Tesseract Coordinates</div>
+                <div class="coordinate-display">
+                    <div class="coordinate-line">
+                        <span class="coordinate-key">Housing Crisis:</span>
+                        <span class="coordinate-value">protocol<span class="coordinate-separator">:</span>narrative<span class="coordinate-separator">:</span>prevent-death<span class="coordinate-separator">:</span>complex</span>
+                    </div>
+                    <div class="coordinate-line">
+                        <span class="coordinate-key">Recovery Work:</span>
+                        <span class="coordinate-value">protocol<span class="coordinate-separator">:</span>invocation<span class="coordinate-separator">:</span>help-addict<span class="coordinate-separator">:</span>chaotic</span>
+                    </div>
+                    <div class="coordinate-line">
+                        <span class="coordinate-key">Memoir Writing:</span>
+                        <span class="coordinate-value">summoning<span class="coordinate-separator">:</span>narrative<span class="coordinate-separator">:</span>tell-story<span class="coordinate-separator">:</span>complex</span>
+                    </div>
+                    <div class="coordinate-line">
+                        <span class="coordinate-key">Medical Crisis:</span>
+                        <span class="coordinate-value">archetype<span class="coordinate-separator">:</span>narrative<span class="coordinate-separator">:</span>prevent-death<span class="coordinate-separator">:</span>chaotic</span>
+                    </div>
+                </div>
+                <p><em>Provides actionable structure for each aspect of the experience.</em></p>
+            </div>
+        </div>
+
+        <div class="key-difference">
+            <div class="difference-title">Key Difference: Complementary, Not Competing</div>
+            <div class="frameworks">
+                <div class="framework-quote cynefin-quote">
+                    <strong>Cynefin:</strong><br>
+                    "This is chaotic terrain - act first, then sense"
+                </div>
+                <div class="vs-divider">vs</div>
+                <div class="framework-quote tesseract-quote">
+                    <strong>Tesseract:</strong><br>
+                    "This chaotic experience coordinates as protocol:invocation:help-addict:chaotic - use recovery protocols, invoke them verbally, this serves helping other addicts, acknowledge the chaos"
+                </div>
+            </div>
+        </div>
+
+        <div class="insight-box">
+            <div class="insight-title">What This Means</div>
+            <p>Cynefin tells you <strong>what kind of cognitive terrain you're in</strong>. Tesseract tells you <strong>exactly which tools to use, how to use them, why you're using them, and acknowledges the terrain you're working in</strong>.</p>
+            <p>The result: Instead of just knowing "this is complex," you have a <strong>coordinate system for navigating complexity while building something meaningful</strong>.</p>
+        </div>
+    </div>
+</body>
+</html>
