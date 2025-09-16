@@ -140,13 +140,140 @@ def extract_tesseract_position(content: str) -> dict:
     # W-Axis: Cognitive Terrain Analysis (Cynefin-based)
     w_terrain = assess_cognitive_complexity(content)
     
-    return {
+    corrected_coordinates = apply_coordinate_corrections(file_path, initial_coordinates)
+
+    # Create initial coordinates
+    initial_coordinates = {
         "x_structure": x_structure,
         "y_transmission": y_transmission,
         "z_purpose": z_purpose,
         "w_terrain": w_terrain,
         "tesseract_key": f"{x_structure}:{y_transmission}:{z_purpose}:{w_terrain}"
     }
+
+    # Apply corrections and return
+    return apply_coordinate_corrections(file_path, initial_coordinates)
+
+# Enhanced coordinate extraction rules for app/utils.py
+# Add these correction rules to the extract_tesseract_position function
+
+def apply_coordinate_corrections(file_path: str, initial_coords: dict) -> dict:
+    """
+    Apply learned corrections to coordinate extraction
+    Based on manual training feedback from Week 1 analysis
+    """
+    corrected = initial_coords.copy()
+    
+    # Job search content correction rules
+    job_search_patterns = [
+        'job-search/', 'resume', 'cover-letter', 'interview', 'employment',
+        'salary', 'hiring', 'application', 'career', 'professional',
+        'two-pronger', 'death-job', 'survival-job', 'linkedin'
+    ]
+    
+    # Survival/crisis content correction rules
+    survival_patterns = [
+        'homeless', 'rent', 'housing', 'money', 'survival', 'poverty',
+        'benefits', 'snap', 'medicaid', 'sober-house', 'shelter',
+        'medical', 'mayo-clinic', 'cirrhosis', 'ssdi', 'disability'
+    ]
+    
+    # Recovery content patterns (should stay help-addict)
+    recovery_patterns = [
+        'aa', 'meeting', 'step', 'sponsor', 'addiction', 'recovery',
+        'sober', 'sobriety', 'program', 'inventory', 'amends'
+    ]
+    
+    file_lower = file_path.lower()
+    
+    # Apply job search corrections
+    if any(pattern in file_lower for pattern in job_search_patterns):
+        if corrected.get('z_purpose') in ['help-addict', 'help-world']:
+            corrected['z_purpose'] = 'financial-amends'
+            corrected['correction_applied'] = 'job_search_pattern'
+    
+    # Apply survival crisis corrections
+    elif any(pattern in file_lower for pattern in survival_patterns):
+        if corrected.get('z_purpose') == 'help-addict':
+            corrected['z_purpose'] = 'prevent-death-poverty'
+            corrected['correction_applied'] = 'survival_pattern'
+    
+    # Keep recovery content as help-addict (no correction needed)
+    elif any(pattern in file_lower for pattern in recovery_patterns):
+        if corrected.get('z_purpose') != 'help-addict':
+            corrected['z_purpose'] = 'help-addict'
+            corrected['correction_applied'] = 'recovery_pattern'
+    
+    # Update tesseract key if corrections were applied
+    if 'correction_applied' in corrected:
+        corrected['tesseract_key'] = f"{corrected['x_structure']}:{corrected['y_transmission']}:{corrected['z_purpose']}:{corrected['w_terrain']}"
+    
+    return corrected
+
+
+def extract_tesseract_position(content: str, file_path: str = "") -> dict:
+    """
+    Enhanced extraction with correction rules applied
+    """
+    # ... existing extraction logic ...
+    
+    initial_coordinates = {
+        'x_structure': determine_structure(content, file_path),
+        'y_transmission': determine_transmission(content, file_path),
+        'z_purpose': determine_purpose(content, file_path),
+        'w_terrain': determine_terrain(content, file_path)
+    }
+    
+    initial_coordinates['tesseract_key'] = f"{initial_coordinates['x_structure']}:{initial_coordinates['y_transmission']}:{initial_coordinates['z_purpose']}:{initial_coordinates['w_terrain']}"
+    
+    # Apply learned corrections
+    corrected_coordinates = apply_coordinate_corrections(file_path, initial_coordinates)
+    
+    return corrected_coordinates
+
+# Enhanced purpose detection with job search priority
+def determine_purpose(content: str, file_path: str = "") -> str:
+    """
+    Determine Z-axis purpose with corrections for common misclassifications
+    """
+    content_lower = content.lower()
+    path_lower = file_path.lower()
+    
+    # Priority 1: Job search and work responsibility (most commonly misclassified)
+    job_indicators = [
+        'resume', 'cover letter', 'job application', 'interview', 'employment',
+        'salary', 'hiring', 'career', 'professional', 'work', 'consultant',
+        'two-pronger', 'death job', 'survival job', 'life-affirming',
+        'linkedin', 'indeed', 'recruiter', 'hr'
+    ]
+    
+    if 'job-search/' in path_lower or any(indicator in content_lower for indicator in job_indicators):
+        return 'financial-amends'
+    
+    # Priority 2: Survival and crisis content
+    survival_indicators = [
+        'homeless', 'rent', 'housing', 'money', 'survival', 'poverty', 'death',
+        'benefits', 'snap', 'medicaid', 'sober house', 'shelter', 'crisis',
+        'medical', 'mayo clinic', 'cirrhosis', 'ssdi', 'disability', 'emergency'
+    ]
+    
+    if any(indicator in content_lower for indicator in survival_indicators):
+        return 'prevent-death-poverty'
+    
+    # Priority 3: Recovery content (legitimate help-addict)
+    recovery_indicators = [
+        'aa', 'meeting', 'step', 'sponsor', 'addiction', 'recovery', 'sober',
+        'sobriety', 'program', 'inventory', 'amends', 'big book', 'prayer',
+        'meditation', 'fellowship'
+    ]
+    
+    if any(indicator in content_lower for indicator in recovery_indicators):
+        return 'help-addict'
+    
+    # Default logic for other content...
+    # ... rest of existing determine_purpose logic ...
+    
+    return 'tell-story'  # Default fallback
 
 def identify_codex_structure(content: str) -> str:
     """Map content to Tesseract X-dimension structures"""

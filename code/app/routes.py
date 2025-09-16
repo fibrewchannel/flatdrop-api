@@ -29,6 +29,30 @@ from app.utils import (
 # TESSERACT 4D COORDINATE SYSTEM ENDPOINTS
 # ============================================================================
 
+@router.get("/api/files/content")
+async def get_file_content(file_path: str):
+    """Retrieve the full content of a specific file"""
+    try:
+        full_path = VAULT_PATH / file_path
+        
+        if not full_path.exists():
+            return {"error": f"File not found: {file_path}"}
+        
+        if not full_path.is_file():
+            return {"error": f"Path is not a file: {file_path}"}
+            
+        content = full_path.read_text(encoding="utf-8")
+        
+        return {
+            "file_path": file_path,
+            "content": content,
+            "size": len(content),
+            "exists": True
+        }
+        
+    except Exception as e:
+        return {"error": f"Error reading file: {str(e)}"}
+        
 @router.post("/api/tags/consolidate")
 async def consolidate_tesseract_redundant_tags(dry_run: bool = True):
     """Consolidate tags that are redundant with Tesseract coordinates"""
