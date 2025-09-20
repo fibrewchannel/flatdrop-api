@@ -3,6 +3,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 import re
 
+from app.schemas import BatchMoveRequest
 
 router = APIRouter()
 
@@ -28,6 +29,21 @@ from app.utils import (
 # ============================================================================
 # TESSERACT 4D COORDINATE SYSTEM ENDPOINTS
 # ============================================================================
+
+async def create_emergency_backup():
+    """Create emergency backup before major operations"""
+    try:
+        backup_path = create_backup_snapshot(VAULT_PATH)
+        return {
+            "status": "success",
+            "backup_path": str(backup_path)
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e)
+        }
+
 
 @router.get("/api/files/content")
 async def get_file_content(file_path: str):
@@ -2605,4 +2621,579 @@ async def assess_memoir_readiness():
             "Identify and fill content gaps in missing chapters",
             "Consider creating timeline documents for chronological flow"
         ]
+    }
+
+@router.post("/api/inload/scan-content")
+async def scan_inload_content():
+    """Scan all _inload directories and generate content signatures"""
+    from .content_mining import InloadContentMiner
+    
+    try:
+        # Initialize miner
+        miner = InloadContentMiner(VAULT_PATH)
+        
+        # Scan content
+        signatures = miner.scan_all_inload_content()
+        
+        # Classify content
+        miner.classify_content()
+        
+        # Generate report
+        report = miner.generate_mining_report()
+        
+        return {
+            "status": "success",
+            "scan_results": report,
+            "total_files": len(signatures),
+            "classifications": {
+                category: len(files)
+                for category, files in miner.mining_results.items()
+            }
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to scan _inload content"
+        }
+
+@router.get("/api/inload/priority-files")
+async def get_priority_inload_files(category: str = "high_value", limit: int = 20):
+    """Get priority files from specific category for manual review"""
+    from .content_mining import InloadContentMiner
+    
+    valid_categories = [
+        "high_value", "memoir_gold", "recovery_threads",
+        "job_survival", "ai_collaboration", "creative_fragments"
+    ]
+    
+    if category not in valid_categories:
+        return {
+            "status": "error",
+            "message": f"Invalid category. Must be one of: {valid_categories}"
+        }
+    
+    try:
+        # Quick scan to get current state
+        miner = InloadContentMiner(VAULT_PATH)
+        miner.scan_all_inload_content()
+        miner.classify_content()
+        
+        # Get requested category
+        category_files = miner.mining_results.get(category, [])
+        
+        # Sort by quality/relevance and limit
+        if category in ["high_value", "memoir_gold"]:
+            sorted_files = sorted(category_files, key=lambda x: x.get('quality', 0), reverse=True)
+        elif category == "recovery_threads":
+            sorted_files = sorted(category_files, key=lambda x: x.get('recovery_markers', 0), reverse=True)
+        elif category == "job_survival":
+            sorted_files = sorted(category_files, key=lambda x: x.get('job_markers', 0) + x.get('medical_markers', 0), reverse=True)
+        else:
+            sorted_files = category_files
+        
+        return {
+            "status": "success",
+            "category": category,
+            "total_in_category": len(category_files),
+            "files": sorted_files[:limit],
+            "suggested_destinations": get_suggested_destinations(category)
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": f"Failed to get priority files for {category}"
+        }
+
+def get_suggested_destinations(category):
+    """Get suggested destination folders for each category"""
+    destinations = {
+        "high_value": ["memoir/spine/", "recovery/practices/", "work-amends/"],
+        "memoir_gold": ["memoir/spine/foundations/", "memoir/spine/recovery/", "memoir/spine/integration/"],
+        "recovery_threads": ["recovery/practices/", "recovery/explorations/", "recovery/personas/"],
+        "job_survival": ["work-amends/job-search/", "work-amends/skills/", "survival/medical/"],
+        "ai_collaboration": ["contribution/systems/", "memoir/spine/integration/"],
+        "creative_fragments": ["contribution/creative/", "memoir/explorations/"]
+    }
+    return destinations.get(category, ["_tesseract-inbox/needs-classification/"])
+
+@router.post("/api/inload/extract-sample")
+async def extract_content_sample(file_path: str, max_words: int = 200):
+    """Extract content sample from specific file for manual review"""
+    try:
+        target_file = VAULT_PATH / file_path
+        if not target_file.exists():
+            return {
+                "status": "error",
+                "message": f"File not found: {file_path}"
+            }
+        
+        content = target_file.read_text(encoding='utf-8')
+        words = content.split()
+        
+        # Extract sample
+        sample_words = words[:max_words]
+        sample_text = ' '.join(sample_words)
+        
+        # Get content signature
+        from .content_mining import InloadContentMiner
+        miner = InloadContentMiner(VAULT_PATH)
+        signature = miner.extract_content_signature(target_file)
+        
+        return {
+            "status": "success",
+            "file_path": file_path,
+            "total_words": len(words),
+            "sample_text": sample_text,
+            "signature": signature,
+            "truncated": len(words) > max_words
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": f"Failed to extract sample from {file_path}"
+        }
+
+@router.post("/api/inload/batch-move")
+async def batch_move_files(request: BatchMoveRequest):
+    moves = request.moves
+
+    # Validate moves structure
+    required_fields = ["source_path", "destination_path"]
+    for move in moves:
+        if not all(field in move for field in required_fields):
+            return {
+                "status": "error",
+                "message": f"Each move must have: {required_fields}"
+            }
+    
+    try:
+        # Create backup before moving
+        backup_result = await create_emergency_backup()
+        if backup_result["status"] != "success":
+            return {
+                "status": "error",
+                "message": "Failed to create backup before batch move"
+            }
+        
+        results = []
+        for move in moves:
+            source = VAULT_PATH / move["source_path"]
+            destination = VAULT_PATH / move["destination_path"]
+            
+            # Ensure destination directory exists
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Perform move
+            if source.exists():
+                source.rename(destination)
+                results.append({
+                    "source": move["source_path"],
+                    "destination": move["destination_path"],
+                    "status": "success"
+                })
+            else:
+                results.append({
+                    "source": move["source_path"],
+                    "destination": move["destination_path"],
+                    "status": "error",
+                    "message": "Source file not found"
+                })
+        
+        successful_moves = len([r for r in results if r["status"] == "success"])
+        
+        return {
+            "status": "success",
+            "total_moves_attempted": len(moves),
+            "successful_moves": successful_moves,
+            "backup_created": backup_result["backup_path"],
+            "move_results": results
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Batch move operation failed"
+        }
+
+@router.post("/api/inload/archive-low-priority")
+async def archive_low_priority_content():
+    """Move low-priority content to archive folder"""
+    from .content_mining import InloadContentMiner
+    
+    try:
+        # Scan to identify archive candidates
+        miner = InloadContentMiner(VAULT_PATH)
+        miner.scan_all_inload_content()
+        miner.classify_content()
+        
+        archive_candidates = miner.mining_results["archive_candidates"]
+        
+        if not archive_candidates:
+            return {
+                "status": "success",
+                "message": "No archive candidates found",
+                "archived_count": 0
+            }
+        
+        # Create archive directory
+        archive_dir = VAULT_PATH / "_archive" / f"inload_archive_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Create backup
+        backup_result = await create_emergency_backup()
+        
+        archived_files = []
+        for candidate in archive_candidates:
+            source_path = VAULT_PATH / candidate["file"]
+            if source_path.exists():
+                # Preserve directory structure in archive
+                relative_path = source_path.relative_to(VAULT_PATH)
+                archive_path = archive_dir / relative_path
+                archive_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                source_path.rename(archive_path)
+                archived_files.append({
+                    "original": candidate["file"],
+                    "archived_to": str(archive_path.relative_to(VAULT_PATH)),
+                    "quality_score": candidate["quality"]
+                })
+        
+        return {
+            "status": "success",
+            "archived_count": len(archived_files),
+            "archive_location": str(archive_dir.relative_to(VAULT_PATH)),
+            "backup_created": backup_result["backup_path"],
+            "archived_files": archived_files
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Archive operation failed"
+        }
+
+@router.get("/api/inload/mining-dashboard")
+async def get_mining_dashboard():
+    """Get comprehensive dashboard of _inload mining status"""
+    from .content_mining import InloadContentMiner
+    
+    try:
+        # Quick scan
+        miner = InloadContentMiner(VAULT_PATH)
+        signatures = miner.scan_all_inload_content()
+        miner.classify_content()
+        
+        # Calculate metrics
+        total_files = len(signatures)
+        total_words = sum(sig['word_count'] for sig in signatures.values())
+        
+        # Quality distribution
+        quality_distribution = defaultdict(int)
+        for sig in signatures.values():
+            quality_range = f"{int(sig['quality_score'])}-{int(sig['quality_score'])+1}"
+            quality_distribution[quality_range] += 1
+        
+        # Theme distribution
+        theme_distribution = defaultdict(int)
+        for sig in signatures.values():
+            theme_distribution[sig['dominant_theme']] += 1
+        
+        # Calculate processing recommendations
+        high_priority_count = len(miner.mining_results["high_value"]) + len(miner.mining_results["memoir_gold"])
+        medium_priority_count = len(miner.mining_results["recovery_threads"]) + len(miner.mining_results["job_survival"])
+        archive_candidate_count = len(miner.mining_results["archive_candidates"])
+        
+        return {
+            "status": "success",
+            "overview": {
+                "total_files": total_files,
+                "total_words": total_words,
+                "avg_quality": round(sum(sig['quality_score'] for sig in signatures.values()) / total_files, 2) if total_files > 0 else 0
+            },
+            "distributions": {
+                "quality": dict(quality_distribution),
+                "themes": dict(theme_distribution)
+            },
+            "processing_recommendations": {
+                "high_priority": high_priority_count,
+                "medium_priority": medium_priority_count,
+                "archive_candidates": archive_candidate_count,
+                "processing_order": [
+                    f"1. Review {high_priority_count} high-priority files first",
+                    f"2. Process {medium_priority_count} medium-priority files",
+                    f"3. Consider archiving {archive_candidate_count} low-quality files"
+                ]
+            },
+            "classifications": {
+                category: len(files)
+                for category, files in miner.mining_results.items()
+            }
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to generate mining dashboard"
+        }
+# Add these endpoints to your routes.py
+
+@router.post("/api/snippets/analyze")
+async def analyze_snippet_quality(quality_threshold: int = 20):
+    """Analyze snippet quality and suggest reorganization"""
+    from .snippet_batch_processor import process_current_snippets
+    
+    try:
+        # Get AI collaboration files (includes snippets)
+        ai_collaboration_result = await get_priority_inload_files("ai_collaboration", 200)
+        
+        if ai_collaboration_result["status"] != "success":
+            return {"status": "error", "message": "Failed to get AI collaboration data"}
+        
+        # Process snippets
+        snippet_analysis = process_current_snippets(
+            VAULT_PATH,
+            ai_collaboration_result,
+            quality_threshold
+        )
+        
+        return {
+            "status": "success",
+            "quality_threshold": quality_threshold,
+            "snippet_analysis": snippet_analysis,
+            "recommendations": generate_snippet_recommendations(snippet_analysis),
+            "extraction_efficiency": calculate_extraction_efficiency(snippet_analysis)
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to analyze snippet quality"
+        }
+
+@router.post("/api/snippets/process")
+async def process_snippets(quality_threshold: int = 20, dry_run: bool = True):
+    """Execute snippet processing and reorganization"""
+    from .snippet_batch_processor import execute_snippet_reorganization, process_current_snippets
+    
+    try:
+        # First analyze snippets
+        ai_collaboration_result = await get_priority_inload_files("ai_collaboration", 200)
+        snippet_analysis = process_current_snippets(VAULT_PATH, ai_collaboration_result, quality_threshold)
+        
+        # Execute the reorganization
+        results = execute_snippet_reorganization(VAULT_PATH, snippet_analysis, dry_run)
+        
+        # Create comprehensive report
+        processing_report = {
+            "status": "success",
+            "dry_run": dry_run,
+            "processing_results": results,
+            "efficiency_analysis": {
+                "total_snippets_found": snippet_analysis["promote_count"] + snippet_analysis["archive_count"],
+                "high_value_extracted": snippet_analysis["promote_count"],
+                "extraction_efficiency_percent": round(
+                    (snippet_analysis["promote_count"] / max(snippet_analysis["promote_count"] + snippet_analysis["archive_count"], 1)) * 100, 1
+                )
+            },
+            "recommendations": generate_post_processing_recommendations(results, snippet_analysis)
+        }
+        
+        return processing_report
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to process snippets"
+        }
+
+@router.get("/api/snippets/stats")
+async def get_snippet_statistics():
+    """Get statistics on snippet extraction efforts"""
+    from .content_mining import InloadContentMiner
+    
+    try:
+        # Scan current content
+        miner = InloadContentMiner(VAULT_PATH)
+        miner.scan_all_inload_content()
+        miner.classify_content()
+        
+        # Find snippet-tagged files
+        snippet_files = []
+        total_ai_collaboration = len(miner.mining_results["ai_collaboration"])
+        
+        for file_path, signature in miner.content_signatures.items():
+            if signature.get('file_path') and miner.is_snippet_file_by_signature(signature):
+                snippet_files.append({
+                    "file": file_path,
+                    "quality": signature["quality_score"],
+                    "theme": signature["dominant_theme"],
+                    "word_count": signature["word_count"]
+                })
+        
+        # Calculate statistics
+        if snippet_files:
+            qualities = [f["quality"] for f in snippet_files]
+            avg_quality = sum(qualities) / len(qualities)
+            high_quality_count = len([q for q in qualities if q >= 20])
+            total_words = sum(f["word_count"] for f in snippet_files)
+        else:
+            avg_quality = 0
+            high_quality_count = 0
+            total_words = 0
+        
+        return {
+            "status": "success",
+            "snippet_statistics": {
+                "total_snippet_files": len(snippet_files),
+                "total_ai_collaboration_files": total_ai_collaboration,
+                "snippet_percentage_of_ai_files": round(len(snippet_files) / max(total_ai_collaboration, 1) * 100, 1),
+                "average_quality_score": round(avg_quality, 2),
+                "high_quality_count": high_quality_count,
+                "extraction_efficiency": round(high_quality_count / max(len(snippet_files), 1) * 100, 1),
+                "total_words_extracted": total_words,
+                "quality_distribution": {
+                    "high_value": len([f for f in snippet_files if f["quality"] >= 50]),
+                    "medium_value": len([f for f in snippet_files if 20 <= f["quality"] < 50]),
+                    "low_value": len([f for f in snippet_files if f["quality"] < 20])
+                }
+            },
+            "top_quality_snippets": sorted(snippet_files, key=lambda x: x["quality"], reverse=True)[:10],
+            "efficiency_analysis": analyze_extraction_efficiency(snippet_files)
+        }
+        
+    except Exception as e:
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to generate snippet statistics"
+        }
+
+def generate_snippet_recommendations(snippet_analysis):
+    """Generate recommendations based on snippet analysis"""
+    recommendations = []
+    
+    promote_count = snippet_analysis["promote_count"]
+    archive_count = snippet_analysis["archive_count"]
+    total = promote_count + archive_count
+    
+    if total == 0:
+        return ["No snippets found in current _inload"]
+    
+    efficiency = (promote_count / total) * 100
+    
+    if efficiency < 10:
+        recommendations.extend([
+            f"Very low extraction efficiency ({efficiency:.1f}%) suggests most ChatGPT conversations are casual",
+            "Consider being more selective about which conversations to extract",
+            "Focus extraction efforts on conversations with clear memoir/recovery/survival themes"
+        ])
+    elif efficiency < 25:
+        recommendations.extend([
+            f"Below-average extraction efficiency ({efficiency:.1f}%)",
+            "Try to identify patterns in high-quality conversations for better targeting"
+        ])
+    else:
+        recommendations.append(f"Good extraction efficiency ({efficiency:.1f}%) - worth continuing this approach")
+    
+    if promote_count > 0:
+        recommendations.append(f"Promote {promote_count} high-quality snippets to organized folders")
+    
+    if archive_count > promote_count * 3:
+        recommendations.append("Consider higher quality threshold to reduce low-value archiving work")
+    
+    return recommendations
+
+def generate_post_processing_recommendations(results, snippet_analysis):
+    """Generate recommendations after processing"""
+    recommendations = []
+    
+    promoted = results["summary"]["promoted"]
+    archived = results["summary"]["archived"]
+    
+    if promoted > 0:
+        recommendations.extend([
+            f"Successfully identified {promoted} valuable conversations from ChatGPT extraction efforts",
+            "Review promoted snippets for integration into memoir or AI collaboration documentation",
+            "Consider these conversations as templates for future high-value ChatGPT interactions"
+        ])
+    
+    if archived > promoted * 2:
+        recommendations.extend([
+            f"High archive ratio ({archived} archived vs {promoted} promoted) suggests extraction process needs refinement",
+            "Focus future ChatGPT conversations on memoir, recovery, or survival themes",
+            "Consider shorter, more targeted conversation exports rather than full session dumps"
+        ])
+    
+    # Efficiency feedback
+    if promoted == 0:
+        recommendations.append("No high-quality snippets found - reassess ChatGPT conversation approach for memoir relevance")
+    
+    return recommendations
+
+def analyze_extraction_efficiency(snippet_files):
+    """Analyze the efficiency of ChatGPT conversation extraction"""
+    if not snippet_files:
+        return {"efficiency": 0, "analysis": "No snippets found"}
+    
+    total = len(snippet_files)
+    high_quality = len([f for f in snippet_files if f["quality"] >= 50])
+    medium_quality = len([f for f in snippet_files if 20 <= f["quality"] < 50])
+    
+    efficiency = (high_quality + medium_quality * 0.5) / total * 100
+    
+    analysis_text = f"""
+    Extraction efficiency: {efficiency:.1f}%
+    - High quality: {high_quality}/{total} ({high_quality/total*100:.1f}%)
+    - Medium quality: {medium_quality}/{total} ({medium_quality/total*100:.1f}%)
+    - Total valuable: {high_quality + medium_quality}/{total}
+    
+    Efficiency assessment: {'Excellent' if efficiency >= 50 else 'Good' if efficiency >= 25 else 'Poor' if efficiency >= 10 else 'Very Poor'}
+    """
+    
+    return {
+        "efficiency_percent": round(efficiency, 1),
+        "quality_breakdown": {
+            "high": high_quality,
+            "medium": medium_quality,
+            "low": total - high_quality - medium_quality
+        },
+        "analysis": analysis_text.strip(),
+        "recommendation": get_efficiency_recommendation(efficiency)
+    }
+
+def get_efficiency_recommendation(efficiency):
+    """Get recommendation based on extraction efficiency"""
+    if efficiency >= 50:
+        return "Excellent extraction rate - continue current approach"
+    elif efficiency >= 25:
+        return "Good extraction rate - minor refinements could help"
+    elif efficiency >= 10:
+        return "Poor extraction rate - focus on memoir-relevant conversations only"
+    else:
+        return "Very poor extraction rate - reconsider extraction strategy entirely"
+
+def calculate_extraction_efficiency(snippet_analysis):
+    """Calculate extraction efficiency metrics"""
+    total = snippet_analysis["promote_count"] + snippet_analysis["archive_count"]
+    if total == 0:
+        return {"efficiency": 0, "assessment": "No snippets processed"}
+    
+    efficiency = (snippet_analysis["promote_count"] / total) * 100
+    
+    return {
+        "efficiency_percent": round(efficiency, 1),
+        "high_value_count": snippet_analysis["promote_count"],
+        "total_extracted": total,
+        "assessment": "Excellent" if efficiency >= 50 else "Good" if efficiency >= 25 else "Poor" if efficiency >= 10 else "Very Poor"
     }

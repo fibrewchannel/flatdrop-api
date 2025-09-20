@@ -1,4 +1,8 @@
+from typing import List
 from pydantic import BaseModel
+
+class BatchMoveRequest(BaseModel):
+    moves: List[dict]
 
 class UploadPayload(BaseModel):
     filename: str
