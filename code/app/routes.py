@@ -2,6 +2,9 @@ from fastapi import APIRouter
 from collections import Counter, defaultdict
 from pathlib import Path
 import re
+import json
+from typing import Optional, List, Dict, Any
+
 
 from app.schemas import BatchMoveRequest
 
@@ -45,6 +48,495 @@ async def create_emergency_backup():
         }
 
 
+@router.get("/api/training/summary")
+async def get_training_summary():
+    """Get overall training results summary from the 30-file analysis"""
+    training_output_dir = Path("/Users/rickshangle/Vaults/flatline-codex/_training_output")
+    
+    try:
+        # Load aggregate analysis
+        summary_file = training_output_dir / "aggregate_analysis" / "training_summary.json"
+        if not summary_file.exists():
+            return {"error": "Training summary not found. Run training nibbler first."}
+        
+        with open(summary_file, 'r') as f:
+            summary_data = json.load(f)
+        
+        # Enhance with calculated insights
+        total_chunks = summary_data.get("total_chunks_extracted", 0)
+        total_files = summary_data.get("total_files_analyzed", 0)
+        
+        return {
+            "training_results": summary_data,
+            "key_insights": {
+                "chunks_per_file": round(total_chunks / total_files, 1) if total_files > 0 else 0,
+                "processing_complexity": calculate_processing_complexity(summary_data),
+                "memoir_potential": assess_memoir_potential(summary_data),
+                "recommended_production_threshold": summary_data.get("threshold_recommendations", {}).get("suggested_production_threshold", 47.85)
+            },
+            "status": "complete",
+            "training_date": summary_data.get("analysis_date", "unknown")
+        }
+        
+    except Exception as e:
+        return {"error": f"Failed to load training summary: {str(e)}"}
+
+@router.get("/api/training/high-quality")
+async def get_high_quality_chunks(
+    min_score: float = 60.0,
+    max_results: int = 50,
+    theme_filter: Optional[str] = None
+):
+    """Get chunks above quality threshold, optionally filtered by theme"""
+    training_output_dir = Path("/Users/rickshangle/Vaults/flatline-codex/_training_output")
+    
+    try:
+        all_chunks = []
+        
+        # Load chunks from all batches
+        batch_dirs = list((training_output_dir / "batch_outputs").glob("batch_*"))
+        for batch_dir in batch_dirs:
+            chunks_file = batch_dir / "extracted_chunks.json"
+            if chunks_file.exists():
+                with open(chunks_file, 'r') as f:
+                    batch_chunks = json.load(f)
+                    all_chunks.extend(batch_chunks)
+        
+        # Filter by quality score
+        high_quality = [
+            chunk for chunk in all_chunks
+            if chunk.get("quality_score", 0) >= min_score
+        ]
+        
+        # Filter by theme if specified
+        if theme_filter:
+            high_quality = [
+                chunk for chunk in high_quality
+                if chunk.get("theme", "").lower() == theme_filter.lower()
+            ]
+        
+        # Sort by quality score (highest first)
+        high_quality.sort(key=lambda x: x.get("quality_score", 0), reverse=True)
+        
+        # Limit results
+        high_quality = high_quality[:max_results]
+        
+        # Calculate statistics
+        if high_quality:
+            scores = [chunk.get("quality_score", 0) for chunk in high_quality]
+            stats = {
+                "total_found": len(high_quality),
+                "score_range": [min(scores), max(scores)],
+                "average_score": round(sum(scores) / len(scores), 2),
+                "themes_present": list(set(chunk.get("theme", "unknown") for chunk in high_quality))
+            }
+        else:
+            stats = {"total_found": 0, "message": "No chunks found above threshold"}
+        
+        return {
+            "filter_criteria": {
+                "min_score": min_score,
+                "theme_filter": theme_filter,
+                "max_results": max_results
+            },
+            "statistics": stats,
+            "high_quality_chunks": high_quality
+        }
+        
+    except Exception as e:
+        return {"error": f"Failed to load high-quality chunks: {str(e)}"}
+
+@router.get("/api/training/batches")
+async def get_training_batches():
+    """List all processed batches with summary statistics"""
+    training_output_dir = Path("/Users/rickshangle/Vaults/flatline-codex/_training_output")
+    
+    try:
+        batch_summaries = []
+        batch_dirs = list((training_output_dir / "batch_outputs").glob("batch_*"))
+        batch_dirs.sort()  # Ensure consistent ordering
+        
+        for batch_dir in batch_dirs:
+            batch_id = batch_dir.name
+            
+            # Load batch statistics
+            stats_file = batch_dir / "batch_stats.json"
+            if stats_file.exists():
+                with open(stats_file, 'r') as f:
+                    batch_stats = json.load(f)
+                
+                # Load processing log for additional details
+                log_file = batch_dir / "processing_log.json"
+                log_summary = {"files_processed": 0, "avg_quality": 0}
+                if log_file.exists():
+                    with open(log_file, 'r') as f:
+                        log_data = json.load(f)
+                        quality_scores = [entry.get("quality_score", 0) for entry in log_data if entry.get("quality_score")]
+                        log_summary = {
+                            "files_processed": len(log_data),
+                            "avg_quality": round(sum(quality_scores) / len(quality_scores), 2) if quality_scores else 0
+                        }
+                
+                batch_summaries.append({
+                    "batch_id": batch_id,
+                    "file_count": batch_stats.get("file_count", 0),
+                    "chunks_extracted": batch_stats.get("total_chunks_extracted", 0),
+                    "processing_date": batch_stats.get("processing_date", "unknown"),
+                    "status_distribution": batch_stats.get("status_distribution", {}),
+                    "quality_range": [
+                        batch_stats.get("quality_distribution", {}).get("min", 0),
+                        batch_stats.get("quality_distribution", {}).get("max", 0)
+                    ],
+                    "dominant_themes": get_top_themes(batch_stats.get("theme_distribution", {})),
+                    "avg_quality": log_summary["avg_quality"]
+                })
+        
+        return {
+            "total_batches": len(batch_summaries),
+            "batch_summaries": batch_summaries,
+            "overall_stats": calculate_overall_batch_stats(batch_summaries)
+        }
+        
+    except Exception as e:
+        return {"error": f"Failed to load batch information: {str(e)}"}
+
+@router.get("/api/training/batch/{batch_id}")
+async def get_batch_details(batch_id: str):
+    """Get detailed information about a specific batch"""
+    training_output_dir = Path("/Users/rickshangle/Vaults/flatline-codex/_training_output")
+    batch_dir = training_output_dir / "batch_outputs" / batch_id
+    
+    if not batch_dir.exists():
+        return {"error": f"Batch {batch_id} not found"}
+    
+    try:
+        batch_details = {}
+        
+        # Load batch statistics
+        stats_file = batch_dir / "batch_stats.json"
+        if stats_file.exists():
+            with open(stats_file, 'r') as f:
+                batch_details["statistics"] = json.load(f)
+        
+        # Load processing log
+        log_file = batch_dir / "processing_log.json"
+        if log_file.exists():
+            with open(log_file, 'r') as f:
+                batch_details["processing_log"] = json.load(f)
+        
+        # Load extracted chunks
+        chunks_file = batch_dir / "extracted_chunks.json"
+        if chunks_file.exists():
+            with open(chunks_file, 'r') as f:
+                chunks_data = json.load(f)
+                batch_details["extracted_chunks"] = chunks_data
+                batch_details["chunk_analysis"] = analyze_batch_chunks(chunks_data)
+        
+        return {
+            "batch_id": batch_id,
+            "batch_details": batch_details,
+            "files_in_batch": batch_details.get("statistics", {}).get("files_processed", [])
+        }
+        
+    except Exception as e:
+        return {"error": f"Failed to load batch {batch_id}: {str(e)}"}
+
+@router.get("/api/training/chunks/search")
+async def search_chunks(
+    query: Optional[str] = None,
+    theme: Optional[str] = None,
+    min_score: Optional[float] = None,
+    coordinate: Optional[str] = None,
+    max_results: int = 100
+):
+    """Search training chunks with multiple filter criteria"""
+    training_output_dir = Path("/Users/rickshangle/Vaults/flatline-codex/_training_output")
+    
+    try:
+        all_chunks = []
+        
+        # Load all chunks
+        batch_dirs = list((training_output_dir / "batch_outputs").glob("batch_*"))
+        for batch_dir in batch_dirs:
+            chunks_file = batch_dir / "extracted_chunks.json"
+            if chunks_file.exists():
+                with open(chunks_file, 'r') as f:
+                    batch_chunks = json.load(f)
+                    all_chunks.extend(batch_chunks)
+        
+        # Apply filters
+        filtered_chunks = all_chunks
+        
+        if min_score is not None:
+            filtered_chunks = [c for c in filtered_chunks if c.get("quality_score", 0) >= min_score]
+        
+        if theme:
+            filtered_chunks = [c for c in filtered_chunks if c.get("theme", "").lower() == theme.lower()]
+        
+        if coordinate:
+            filtered_chunks = [c for c in filtered_chunks if coordinate in c.get("coordinates", {}).get("tesseract_key", "")]
+        
+        if query:
+            # Simple text search in content
+            query_lower = query.lower()
+            filtered_chunks = [
+                c for c in filtered_chunks
+                if query_lower in c.get("content", "").lower()
+            ]
+        
+        # Sort by quality score
+        filtered_chunks.sort(key=lambda x: x.get("quality_score", 0), reverse=True)
+        filtered_chunks = filtered_chunks[:max_results]
+        
+        return {
+            "search_criteria": {
+                "query": query,
+                "theme": theme,
+                "min_score": min_score,
+                "coordinate": coordinate,
+                "max_results": max_results
+            },
+            "total_found": len(filtered_chunks),
+            "results": filtered_chunks
+        }
+        
+    except Exception as e:
+        return {"error": f"Search failed: {str(e)}"}
+
+@router.get("/api/training/coordinates/distribution")
+async def get_coordinate_distribution():
+    """Analyze distribution of Tesseract coordinates in training data"""
+    training_output_dir = Path("/Users/rickshangle/Vaults/flatline-codex/_training_output")
+    
+    try:
+        all_coordinates = []
+        
+        # Collect coordinates from all chunks
+        batch_dirs = list((training_output_dir / "batch_outputs").glob("batch_*"))
+        for batch_dir in batch_dirs:
+            chunks_file = batch_dir / "extracted_chunks.json"
+            if chunks_file.exists():
+                with open(chunks_file, 'r') as f:
+                    chunks = json.load(f)
+                    for chunk in chunks:
+                        coords = chunk.get("coordinates", {})
+                        if coords:
+                            all_coordinates.append(coords)
+        
+        # Analyze distribution
+        from collections import Counter
+        
+        structure_dist = Counter(coord.get("x_structure") for coord in all_coordinates)
+        transmission_dist = Counter(coord.get("y_transmission") for coord in all_coordinates)
+        purpose_dist = Counter(coord.get("z_purpose") for coord in all_coordinates)
+        terrain_dist = Counter(coord.get("w_terrain") for coord in all_coordinates)
+        tesseract_keys = Counter(coord.get("tesseract_key") for coord in all_coordinates)
+        
+        return {
+            "total_coordinates": len(all_coordinates),
+            "dimensional_distributions": {
+                "x_structure": dict(structure_dist.most_common()),
+                "y_transmission": dict(transmission_dist.most_common()),
+                "z_purpose": dict(purpose_dist.most_common()),
+                "w_terrain": dict(terrain_dist.most_common())
+            },
+            "coordinate_combinations": dict(tesseract_keys.most_common(20)),
+            "4d_insights": {
+                "most_common_structure": structure_dist.most_common(1)[0] if structure_dist else ("none", 0),
+                "most_common_transmission": transmission_dist.most_common(1)[0] if transmission_dist else ("none", 0),
+                "dominant_purpose": purpose_dist.most_common(1)[0] if purpose_dist else ("none", 0),
+                "primary_terrain": terrain_dist.most_common(1)[0] if terrain_dist else ("none", 0)
+            }
+        }
+        
+    except Exception as e:
+        return {"error": f"Failed to analyze coordinates: {str(e)}"}
+
+@router.get("/api/training/patterns/effectiveness")
+async def analyze_pattern_effectiveness():
+    """Analyze which content patterns are most effective at predicting quality"""
+    training_output_dir = Path("/Users/rickshangle/Vaults/flatline-codex/_training_output")
+    
+    try:
+        pattern_quality_data = []
+        
+        # Collect pattern data from all chunks
+        batch_dirs = list((training_output_dir / "batch_outputs").glob("batch_*"))
+        for batch_dir in batch_dirs:
+            chunks_file = batch_dir / "extracted_chunks.json"
+            if chunks_file.exists():
+                with open(chunks_file, 'r') as f:
+                    chunks = json.load(f)
+                    for chunk in chunks:
+                        patterns = chunk.get("patterns", {})
+                        quality = chunk.get("quality_score", 0)
+                        pattern_quality_data.append({
+                            "patterns": patterns,
+                            "quality": quality,
+                            "theme": chunk.get("theme", "unknown")
+                        })
+        
+        # Analyze pattern effectiveness
+        pattern_analysis = {}
+        
+        for data in pattern_quality_data:
+            for pattern_name, pattern_count in data["patterns"].items():
+                if pattern_name not in pattern_analysis:
+                    pattern_analysis[pattern_name] = {
+                        "total_files": 0,
+                        "total_quality": 0,
+                        "high_quality_files": 0,
+                        "avg_count_per_file": 0,
+                        "total_count": 0
+                    }
+                
+                if pattern_count > 0:  # Only count files that have this pattern
+                    pattern_analysis[pattern_name]["total_files"] += 1
+                    pattern_analysis[pattern_name]["total_quality"] += data["quality"]
+                    pattern_analysis[pattern_name]["total_count"] += pattern_count
+                    
+                    if data["quality"] > 50:  # Arbitrary high quality threshold
+                        pattern_analysis[pattern_name]["high_quality_files"] += 1
+        
+        # Calculate effectiveness metrics
+        for pattern_name, stats in pattern_analysis.items():
+            if stats["total_files"] > 0:
+                stats["avg_quality"] = round(stats["total_quality"] / stats["total_files"], 2)
+                stats["avg_count_per_file"] = round(stats["total_count"] / stats["total_files"], 2)
+                stats["high_quality_ratio"] = round(stats["high_quality_files"] / stats["total_files"], 3)
+                
+                # Effectiveness score combines quality prediction and prevalence
+                stats["effectiveness_score"] = round(
+                    (stats["avg_quality"] / 100) * 0.6 +
+                    stats["high_quality_ratio"] * 0.4, 3
+                )
+        
+        # Sort by effectiveness
+        effective_patterns = sorted(
+            pattern_analysis.items(),
+            key=lambda x: x[1].get("effectiveness_score", 0),
+            reverse=True
+        )
+        
+        return {
+            "total_patterns_analyzed": len(pattern_analysis),
+            "most_effective_patterns": effective_patterns[:10],
+            "pattern_recommendations": generate_pattern_recommendations(effective_patterns),
+            "all_pattern_stats": dict(effective_patterns)
+        }
+        
+    except Exception as e:
+        return {"error": f"Failed to analyze pattern effectiveness: {str(e)}"}
+
+# ============================================================================
+# HELPER FUNCTIONS
+# ============================================================================
+
+def calculate_processing_complexity(summary_data: dict) -> str:
+    """Calculate how complex the processing will be based on training data"""
+    status_dist = summary_data.get("processing_distribution", {})
+    complex_ratio = status_dist.get("complex", 0) / sum(status_dist.values()) if status_dist else 0
+    
+    if complex_ratio > 0.6:
+        return "high - many files need AI processing"
+    elif complex_ratio > 0.3:
+        return "medium - balanced mix of processing types"
+    else:
+        return "low - mostly simple files"
+
+def assess_memoir_potential(summary_data: dict) -> str:
+    """Assess memoir potential based on training results"""
+    theme_dist = summary_data.get("theme_distribution", {})
+    
+    memoir_themes = theme_dist.get("ai_collaboration", 0) + theme_dist.get("recovery", 0)
+    total_themes = sum(theme_dist.values()) if theme_dist else 1
+    
+    memoir_ratio = memoir_themes / total_themes
+    
+    if memoir_ratio > 0.6:
+        return "high - strong memoir themes present"
+    elif memoir_ratio > 0.3:
+        return "medium - moderate memoir content"
+    else:
+        return "developing - needs more memoir-focused content"
+
+def get_top_themes(theme_distribution: dict, limit: int = 3) -> list:
+    """Get top themes from distribution"""
+    if not theme_distribution:
+        return []
+    
+    sorted_themes = sorted(theme_distribution.items(), key=lambda x: x[1], reverse=True)
+    return [theme[0] for theme in sorted_themes[:limit]]
+
+def calculate_overall_batch_stats(batch_summaries: list) -> dict:
+    """Calculate overall statistics across all batches"""
+    if not batch_summaries:
+        return {}
+    
+    total_files = sum(batch.get("file_count", 0) for batch in batch_summaries)
+    total_chunks = sum(batch.get("chunks_extracted", 0) for batch in batch_summaries)
+    
+    quality_scores = [batch.get("avg_quality", 0) for batch in batch_summaries if batch.get("avg_quality", 0) > 0]
+    avg_quality = sum(quality_scores) / len(quality_scores) if quality_scores else 0
+    
+    return {
+        "total_files_processed": total_files,
+        "total_chunks_extracted": total_chunks,
+        "avg_chunks_per_file": round(total_chunks / total_files, 2) if total_files > 0 else 0,
+        "avg_quality_across_batches": round(avg_quality, 2)
+    }
+
+def analyze_batch_chunks(chunks_data: list) -> dict:
+    """Analyze chunks within a specific batch"""
+    if not chunks_data:
+        return {}
+    
+    qualities = [chunk.get("quality_score", 0) for chunk in chunks_data]
+    themes = [chunk.get("theme", "unknown") for chunk in chunks_data]
+    word_counts = [chunk.get("word_count", 0) for chunk in chunks_data]
+    
+    from collections import Counter
+    theme_counter = Counter(themes)
+    
+    return {
+        "chunk_count": len(chunks_data),
+        "quality_stats": {
+            "min": min(qualities) if qualities else 0,
+            "max": max(qualities) if qualities else 0,
+            "avg": round(sum(qualities) / len(qualities), 2) if qualities else 0
+        },
+        "theme_distribution": dict(theme_counter.most_common()),
+        "word_count_stats": {
+            "min": min(word_counts) if word_counts else 0,
+            "max": max(word_counts) if word_counts else 0,
+            "avg": round(sum(word_counts) / len(word_counts), 1) if word_counts else 0
+        },
+        "high_quality_chunks": len([q for q in qualities if q > 70])
+    }
+
+def generate_pattern_recommendations(effective_patterns: list) -> list:
+    """Generate recommendations based on pattern effectiveness analysis"""
+    recommendations = []
+    
+    if not effective_patterns:
+        return ["No pattern data available for recommendations"]
+    
+    # Find most effective pattern
+    top_pattern = effective_patterns[0]
+    recommendations.append(f"'{top_pattern[0]}' is your most effective quality predictor - consider weighting it higher")
+    
+    # Find patterns with high quality but low prevalence
+    for pattern_name, stats in effective_patterns[:5]:
+        if stats.get("avg_quality", 0) > 60 and stats.get("total_files", 0) < 5:
+            recommendations.append(f"'{pattern_name}' shows high quality but appears rarely - look for more content with this pattern")
+    
+    # Find patterns with many files but low quality
+    for pattern_name, stats in effective_patterns[-3:]:
+        if stats.get("total_files", 0) > 10 and stats.get("avg_quality", 0) < 30:
+            recommendations.append(f"'{pattern_name}' is common but low quality - consider reducing its weight")
+    
+    return recommendations
+    
 @router.get("/api/files/content")
 async def get_file_content(file_path: str):
     """Retrieve the full content of a specific file"""
