@@ -489,6 +489,7 @@ async def serve_tesseract_visualization():
         
         document.getElementById('purpose-filter').addEventListener('change', updateVisualization);
         document.getElementById('terrain-filter').addEventListener('change', updateVisualization);
+        document.getElementById('view-mode').addEventListener('change', updateVisualization);
         document.getElementById('quality-slider').addEventListener('input', (e) => {
             document.getElementById('quality-value').textContent = e.target.value;
             updateVisualization();
@@ -498,7 +499,6 @@ async def serve_tesseract_visualization():
 </html>"""
     
     return HTMLResponse(content=html_content)
-
 @router.get("/api/training/summary")
 async def get_training_summary():
     """Get overall training results summary from the 30-file analysis"""

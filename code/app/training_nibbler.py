@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Tesseract Training Nibbler
-Processes Rick's _testtraining files to learn content patterns and calibrate thresholds
+Processes Rick's training files to learn content patterns and calibrate thresholds
 """
 
 import json
@@ -14,6 +14,10 @@ import statistics
 
 # Import existing TesseractConfig system
 from tesseract_config import get_analyzer, get_config
+
+# CONFIGURATION: Set source directory here
+SOURCE_DIR = "/Users/rickshangle/Vaults/flatline-codex/_inload"
+OUTPUT_DIR = "/Users/rickshangle/Vaults/flatline-codex/_training_output"
 
 @dataclass
 class ProcessingResult:
@@ -50,7 +54,7 @@ class TrainingNibbler:
         """Create the training output directory structure"""
         dirs_to_create = [
             "batch_outputs",
-            "aggregate_analysis", 
+            "aggregate_analysis",
             "manual_review/borderline_cases",
             "manual_review/pattern_mismatches",
             "training_logs"
@@ -103,7 +107,7 @@ class TrainingNibbler:
         # Detect multiple topics (complex processing needed)
         topic_markers = [
             r'\b(AA|recovery|sobriety|step work|sponsor|meeting)\b',  # Recovery
-            r'\b(Mayo|clinic|doctor|medical|cirrhosis|liver)\b',       # Medical  
+            r'\b(Mayo|clinic|doctor|medical|cirrhosis|liver)\b',       # Medical
             r'\b(memoir|story|childhood|I remember|years ago)\b',      # Memoir
             r'\b(housing|homeless|sober house|rent|shelter)\b',        # Survival
             r'\b(work|job|interview|employment|income)\b',             # Work
@@ -338,16 +342,16 @@ class TrainingNibbler:
         return batch_stats
     
     def process_all_training_files(self) -> Dict[str, Any]:
-        """Process all files in _testtraining directory"""
+        """Process all files in source directory (recursively)"""
         
-        # Get all .md files
-        md_files = list(self.source_dir.glob("*.md"))
+        # Get all .md files RECURSIVELY
+        md_files = list(self.source_dir.rglob("*.md"))
         if not md_files:
             print(f"❌ No .md files found in {self.source_dir}")
             return {}
         
         print(f"🎯 Training Nibbler Starting")
-        print(f"📁 Source: {self.source_dir} ({len(md_files)} files)")
+        print(f"📁 Source: {self.source_dir} ({len(md_files)} files found recursively)")
         print(f"📁 Output: {self.output_dir}")
         print(f"⚙️ Config: {self.config.config_file}")
         print(f"🎲 Quality threshold: {self.TRAINING_QUALITY_THRESHOLD} (ultra-permissive)")
@@ -468,11 +472,11 @@ class TrainingNibbler:
         print(f"   Suggested production threshold: {recommendations['threshold_recommendations'].get('suggested_production_threshold', 'TBD')}")
 
 def main():
-    """Run the training nibbler on Rick's _testtraining files"""
+    """Run the training nibbler using global configuration"""
     
-    # Configuration - proper paths for Flatdrop API context
-    source_dir = "/Users/rickshangle/Vaults/flatline-codex/_testtraining"
-    output_dir = "/Users/rickshangle/Vaults/flatline-codex/_training_output"
+    # Use global configuration
+    source_dir = SOURCE_DIR
+    output_dir = OUTPUT_DIR
     
     # Verify source directory exists
     if not Path(source_dir).exists():

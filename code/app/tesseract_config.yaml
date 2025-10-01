@@ -1,0 +1,199 @@
+system:
+  vault_name: flatline-codex
+  backup_retention_days: 30
+  api_version: 1.0.0
+  coordinate_format: single_value_per_dimension
+content_patterns:
+  memoir_markers:
+    regex: \b(I remember|years ago|childhood|growing up|my father|my mother|when I
+      was)\b
+    weight: 3.0
+    description: Indicators of memoir-quality narrative content
+  recovery_markers:
+    regex: \b(AA|recovery|sobriety|step work|sponsor|meeting|clean time|twelve steps?)\b
+    weight: 2.5
+    description: Recovery program and addiction-related content
+  job_markers:
+    regex: \b(interview|resume|job|employment|salary|work|career|application|hire|employer)\b
+    weight: 2.0
+    description: Employment and career-related content
+  ai_markers:
+    regex: \b(nyx|chatgpt|AI|prompt|assistant|LLM|claude|gpt)\b
+    weight: 1.0
+    description: AI collaboration and tool usage
+  medical_markers:
+    regex: \b(mayo|doctor|medical|therapy|health|cirrhosis|treatment|hospital|clinic)\b
+    weight: 1.5
+    description: Medical treatment and health management
+  technical_markers:
+    regex: \b(API|code|system|database|server|function|class|script|programming)\b
+    weight: -0.5
+    description: Technical implementation details (memoir penalty)
+  creative_markers:
+    regex: \b(art|music|draw|design|image|creative|story|poem|paint|sketch)\b
+    weight: 1.0
+    description: Creative and artistic content
+  emotional_markers:
+    regex: \b(fear|anxiety|depression|trauma|anger|grief|pain|joy|love|hope)\b
+    weight: 0.5
+    description: Emotional processing and expression
+quality_scoring:
+  length_bonuses:
+    1000: 15
+    500: 10
+    200: 7
+    50: 3
+  pattern_multipliers:
+    memoir_markers: 8
+    recovery_markers: 6
+    job_markers: 4
+    medical_markers: 4
+    ai_markers: 3
+    emotional_markers: 5
+    creative_markers: 4
+  penalties:
+    technical_dominant: -1
+  bonuses:
+    high_first_person: 8
+    medium_first_person: 5
+    any_first_person: 3
+  first_person_thresholds:
+    high: 15
+    medium: 7
+    low: 3
+  minimum_base_score: 10
+coordinate_assignment_rules:
+  structure_thresholds:
+    shadowcast:
+      memoir_markers: 2
+    protocol:
+      recovery_markers: 2
+    expansion:
+      creative_markers: 2
+    summoning:
+      ai_markers: 3
+    archetype:
+      default: true
+  transmission_thresholds:
+    narrative:
+      first_person_pronouns: 20
+      memoir_markers: 1
+    image:
+      creative_markers: 2
+      image_content: true
+    invocation:
+      has_dialogue: true
+      recovery_markers: 2
+    text:
+      ai_markers: 2
+      default: true
+  purpose_thresholds:
+    tell-story:
+      memoir_markers: 1
+      first_person_pronouns: 15
+    help-addict:
+      recovery_markers: 1
+    prevent-death-poverty:
+      job_markers: 1
+      medical_markers: 1
+    help-world:
+      creative_markers: 2
+    financial-amends:
+      job_markers: 2
+  terrain_thresholds:
+    chaotic:
+      emotional_markers: 5
+    complicated:
+      technical_markers: 5
+    complex:
+      memoir_markers: 2
+      first_person_pronouns: 20
+    obvious:
+      default: true
+folder_structure:
+  tell-story:
+    base_path: memoir
+    structure_mappings:
+      shadowcast: explorations
+      protocol: practices
+      archetype: personas
+      default: spine/foundations
+  help-addict:
+    base_path: recovery
+    structure_mappings:
+      protocol: practices
+      archetype: personas
+      shadowcast: explorations
+      default: activations
+  prevent-death-poverty:
+    base_path: survival
+    theme_mappings:
+      medical: medical
+      housing: housing
+      default: systems
+  financial-amends:
+    base_path: work-amends
+    structure_mappings:
+      protocol: practices
+      archetype: personas
+      default: job-search
+  help-world:
+    base_path: contribution
+    theme_mappings:
+      creative: creative
+      technical: systems
+      default: context
+    structure_mappings:
+      expansion: context
+  inbox:
+    base_path: _tesseract-inbox
+    default: needs-classification
+theme_scoring:
+  memoir:
+    memoir_markers: 3
+  recovery:
+    recovery_markers: 2.5
+  survival:
+    job_markers: 1
+    medical_markers: 1
+  ai_collaboration:
+    ai_markers: 1
+  technical:
+    technical_markers: 1
+  creative:
+    creative_markers: 1
+  emotional:
+    emotional_markers: 1
+tesseract_dimensions:
+  x_structure:
+    values:
+    - archetype
+    - protocol
+    - shadowcast
+    - expansion
+    - summoning
+    description: How content is organized/structured
+  y_transmission:
+    values:
+    - narrative
+    - text
+    - image
+    - tarot
+    - invocation
+    description: How information is transmitted/presented
+  z_purpose:
+    values:
+    - tell-story
+    - help-addict
+    - prevent-death-poverty
+    - financial-amends
+    - help-world
+    description: Rick's 5 core life intents
+  w_terrain:
+    values:
+    - obvious
+    - complicated
+    - complex
+    - chaotic
+    - confused
+    description: Cognitive complexity/emotional terrain
