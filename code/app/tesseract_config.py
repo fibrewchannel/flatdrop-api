@@ -89,35 +89,53 @@ class TesseractConfig:
                 }
             },
             
-            # Extracted from single_file_tester.py lines 83-98
+            # Replace the 'quality_scoring' section in tesseract_config.py
+            # Current problem: Average quality is 4.32, most chunks score under 30
+            # Fix: Increase base scores and make patterns more rewarding
+
             'quality_scoring': {
-                'length_bonuses': {
-                    1000: 4,
-                    500: 3,
-                    200: 2,
-                    50: 1
-                },
-                'pattern_multipliers': {
-                    'memoir_markers': 3,
-                    'recovery_markers': 2.5,
-                    'job_markers': 2,
-                    'medical_markers': 1.5,
-                    'ai_markers': 1,
-                    'emotional_markers': 0.5
-                },
-                'penalties': {
-                    'technical_dominant': -3,  # Applied when technical > 10 and no personal content
-                },
-                'bonuses': {
-                    'high_first_person': 2,  # >20 first person pronouns
-                    'medium_first_person': 1  # 10-20 first person pronouns
-                },
-                'first_person_thresholds': {
-                    'high': 20,
-                    'medium': 10
-                }
+              # INCREASED: Length bonuses now start lower and reward more
+              'length_bonuses': {
+                1000: 15,      # Was 4 → Now 15 (memoir-length content deserves more)
+                500: 10,       # Was 3 → Now 10
+                200: 7,        # Was 2 → Now 7
+                50: 3          # Was 1 → Now 3
+              },
+              
+              # INCREASED: Pattern multipliers boosted for memoir relevance
+              'pattern_multipliers': {
+                'memoir_markers': 8,        # Was 3 → Now 8 (memoir is your PRIMARY goal)
+                'recovery_markers': 6,      # Was 2.5 → Now 6 (core life purpose)
+                'job_markers': 4,           # Was 2 → Now 4
+                'medical_markers': 4,       # Was 1.5 → Now 4 (survival urgency)
+                'ai_markers': 3,            # Was 1 → Now 3 (collaboration backbone)
+                'emotional_markers': 5,     # Was 0.5 → Now 5 (memoir needs emotion!)
+                'creative_markers': 4       # NEW: Add this pattern for creative content
+              },
+              
+              # REDUCED: Technical penalty less harsh
+              'penalties': {
+                'technical_dominant': -1   # Was -3 → Now -1 (you DO technical memoir)
+              },
+              
+              # INCREASED: First person bonuses (memoir voice!)
+              'bonuses': {
+                'high_first_person': 8,     # Was 2 → Now 8
+                'medium_first_person': 5,   # Was 1 → Now 5
+                'any_first_person': 3       # NEW: Even low first-person gets bonus
+              },
+              
+              # LOWERED: First person thresholds (easier to trigger)
+              'first_person_thresholds': {
+                'high': 15,     # Was 20 → Now 15
+                'medium': 7,    # Was 10 → Now 7
+                'low': 3        # NEW: Any personal voice counts
+              },
+
+              # NEW: Base quality floor
+              'minimum_base_score': 10  # Every chunk starts at 10, not 0
             },
-            
+
             # Extracted from single_file_tester.py lines 125-170
             'coordinate_assignment_rules': {
                 'structure_thresholds': {
@@ -306,7 +324,9 @@ class ContentAnalyzer:
     
     def calculate_quality_score(self, content: str, patterns: Dict[str, int], word_count: int) -> float:
         """Calculate quality score using configured weights and bonuses"""
-        score = 0
+        
+        # NEW: Start with minimum base score
+        score = self.quality_config.get('minimum_base_score', 0)
         
         # Length bonuses from config
         for min_words, bonus in sorted(self.quality_config['length_bonuses'].items(), reverse=True):
@@ -320,22 +340,26 @@ class ContentAnalyzer:
                 score += patterns[pattern_name] * multiplier
         
         # Technical penalty from config
-        if (patterns.get('technical_markers', 0) > 10 and 
-            patterns.get('memoir_markers', 0) == 0 and 
+        if (patterns.get('technical_markers', 0) > 10 and
+            patterns.get('memoir_markers', 0) == 0 and
             patterns.get('emotional_markers', 0) == 0):
             score += self.quality_config['penalties']['technical_dominant']
         
-        # First person bonuses from config
+        # UPDATED: First person bonuses with three tiers
         first_person_count = len(re.findall(r'\b(I|me|my)\b', content))
         thresholds = self.quality_config['first_person_thresholds']
         
-        if first_person_count > thresholds['high']:
+        if first_person_count > thresholds.get('high', 15):
             score += self.quality_config['bonuses']['high_first_person']
-        elif first_person_count > thresholds['medium']:
+        elif first_person_count > thresholds.get('medium', 7):
             score += self.quality_config['bonuses']['medium_first_person']
+        elif first_person_count > thresholds.get('low', 3):
+            # NEW: Bonus for any first-person voice
+            score += self.quality_config['bonuses'].get('any_first_person', 0)
         
         return round(max(0, score), 1)
-    
+        
+        
     def identify_dominant_theme(self, patterns: Dict[str, int]) -> str:
         """Identify dominant theme using configured scoring"""
         theme_scores = {}

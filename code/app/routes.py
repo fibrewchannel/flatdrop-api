@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import json
 from typing import Optional, List, Dict, Any
+from fastapi.responses import HTMLResponse
 
 
 from app.schemas import BatchMoveRequest
@@ -47,6 +48,456 @@ async def create_emergency_backup():
             "error": str(e)
         }
 
+@router.get("/viz", response_class=HTMLResponse)
+async def serve_tesseract_visualization():
+    """Serve the Tesseract 4D visualization directly from the API (bypasses CORS)"""
+    
+    html_content = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tesseract 4D Memoir Explorer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            color: #fff;
+            overflow-x: hidden;
+        }
+        
+        #container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            text-align: center;
+            padding: 30px 0;
+            background: rgba(0,0,0,0.3);
+            border-radius: 12px;
+            margin-bottom: 30px;
+        }
+        
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #4f9eff, #ff6b6b, #ffd93d);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .subtitle {
+            font-size: 1.1em;
+            opacity: 0.8;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+            background: rgba(0,0,0,0.3);
+            padding: 20px;
+            border-radius: 12px;
+        }
+        
+        .filter-group {
+            flex: 1;
+            min-width: 200px;
+        }
+        
+        .filter-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #4f9eff;
+        }
+        
+        select, input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid rgba(79, 158, 255, 0.3);
+            background: rgba(0,0,0,0.5);
+            color: #fff;
+            border-radius: 8px;
+            font-size: 1em;
+        }
+        
+        select:focus, input:focus {
+            outline: none;
+            border-color: #4f9eff;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: rgba(0,0,0,0.3);
+            padding: 20px;
+            border-radius: 12px;
+            border: 2px solid rgba(79, 158, 255, 0.2);
+        }
+        
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            opacity: 0.7;
+            font-size: 0.9em;
+        }
+        
+        #visualization {
+            background: rgba(0,0,0,0.2);
+            border-radius: 12px;
+            border: 2px solid rgba(79, 158, 255, 0.2);
+            position: relative;
+            min-height: 600px;
+        }
+        
+        .node {
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .node:hover {
+            stroke: #fff;
+            stroke-width: 3px;
+        }
+        
+        .tooltip {
+            position: absolute;
+            background: rgba(0,0,0,0.9);
+            border: 2px solid #4f9eff;
+            border-radius: 8px;
+            padding: 15px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s;
+            max-width: 400px;
+            z-index: 1000;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        
+        .tooltip.active {
+            opacity: 1;
+        }
+        
+        .legend {
+            margin-top: 20px;
+            padding: 20px;
+            background: rgba(0,0,0,0.3);
+            border-radius: 12px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+        }
+        
+        .coordinate-display {
+            font-family: 'Monaco', monospace;
+            font-size: 0.9em;
+            color: #ffd93d;
+        }
+        
+        .status-indicator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 8px;
+            border: 2px solid #4f9eff;
+            z-index: 2000;
+            transition: opacity 0.3s;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <header>
+            <h1>🎲 Tesseract 4D Memoir Explorer</h1>
+            <p class="subtitle" id="chunk-count">Loading training data...</p>
+            <p class="subtitle">Rick's Flatline Codex visualized across Structure × Transmission × Purpose × Terrain</p>
+        </header>
+        
+        <div class="controls">
+            <div class="filter-group">
+                <label>Z-Axis: Purpose Filter</label>
+                <select id="purpose-filter">
+                    <option value="all">All Purposes</option>
+                    <option value="tell-story">📖 Tell My Story</option>
+                    <option value="help-addict">🔄 Help Another Addict</option>
+                    <option value="prevent-death">⚕️ Prevent Death/Poverty</option>
+                    <option value="financial-amends">💼 Financial Amends</option>
+                    <option value="help-world">🌍 Help the World</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label>W-Axis: Cognitive Terrain</label>
+                <select id="terrain-filter">
+                    <option value="all">All Terrain Types</option>
+                    <option value="obvious">💡 Obvious (Clear)</option>
+                    <option value="complicated">🔧 Complicated (Structured)</option>
+                    <option value="complex">🧠 Complex (Thoughtful)</option>
+                    <option value="chaotic">💥 Chaotic (Crisis)</option>
+                    <option value="confused">❓ Confused (Mixed)</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label>Quality Threshold</label>
+                <input type="range" id="quality-slider" min="0" max="100" value="0" step="5">
+                <span id="quality-value">0</span>
+            </div>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="total-visible">0</div>
+                <div class="stat-label">Visible Chunks</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="avg-quality">0</div>
+                <div class="stat-label">Avg Quality Score</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="memoir-gold">0</div>
+                <div class="stat-label">Memoir Gold (80+)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="dominant-theme">Loading</div>
+                <div class="stat-label">Dominant Theme</div>
+            </div>
+        </div>
+        
+        <div id="visualization"></div>
+        
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-color" style="background: #ff6b6b;"></div>
+                <span>Tell My Story</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #4f9eff;"></div>
+                <span>Help Addict</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #ffd93d;"></div>
+                <span>Prevent Death</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #6bcf7f;"></div>
+                <span>Financial Amends</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-color" style="background: #a78bfa;"></div>
+                <span>Help World</span>
+            </div>
+            <div style="margin-left: auto;">
+                <strong>Size</strong> = Quality Score | <strong>Brightness</strong> = Cognitive Terrain
+            </div>
+        </div>
+        
+        <div class="tooltip" id="tooltip"></div>
+    </div>
+    
+    <div class="status-indicator" id="status">🔄 Loading data...</div>
+    
+    <script>
+        let trainingData = [];
+        // Use search with no filters to get ALL chunks
+        const apiEndpoint = '/api/training/chunks/search?max_results=500&min_score=0';
+        
+        const statusEl = document.getElementById('status');
+        
+        // Fetch real data from same-origin API (no CORS issues!)
+        fetch(apiEndpoint)
+            .then(response => response.json())
+            .then(data => {
+                console.log('Raw API Response:', data); // DEBUG: See what we got
+                console.log('Total results:', data.results ? data.results.length : 'NO RESULTS');
+                
+                if (data.results && data.results.length > 0) {
+                    trainingData = data.results.map(chunk => {
+                        const coords = chunk.coordinates || {};
+                        return {
+                            id: chunk.chunk_id || chunk.id,
+                            coordinates: {
+                                x_structure: coords.x_structure || 'unknown',
+                                y_transmission: coords.y_transmission || 'unknown',
+                                z_purpose: coords.z_purpose || 'tell-story',
+                                w_terrain: coords.w_terrain || 'complex',
+                                tesseract_key: coords.tesseract_key || 'unknown'
+                            },
+                            quality_score: chunk.quality_score || 0,
+                            theme: chunk.theme || 'unknown',
+                            word_count: chunk.word_count || 0,
+                            file_path: chunk.source_file || chunk.file_path || 'unknown',
+                            content: chunk.content ? chunk.content.substring(0, 200) + '...' : ''
+                        };
+                    });
+                    
+                    statusEl.innerHTML = `✅ Loaded ${trainingData.length} chunks`;
+                    statusEl.style.borderColor = '#6bcf7f';
+                    document.getElementById('chunk-count').textContent = `${trainingData.length} chunks extracted from training`;
+                    setTimeout(() => statusEl.style.opacity = '0', 3000);
+                    updateVisualization();
+                }
+            })
+            .catch(error => {
+                console.error('API fetch failed:', error);
+                statusEl.innerHTML = '⚠️ Failed to load data';
+                statusEl.style.borderColor = '#ff6b6b';
+            });
+        
+        const purposeColors = {
+            'tell-story': '#ff6b6b',
+            'help-addict': '#4f9eff',
+            'prevent-death': '#ffd93d',
+            'financial-amends': '#6bcf7f',
+            'help-world': '#a78bfa'
+        };
+        
+        const width = Math.min(document.getElementById('visualization').clientWidth, 1400);
+        const height = 600;
+        
+        const svg = d3.select('#visualization')
+            .append('svg')
+            .attr('width', width)
+            .attr('height', height);
+        
+        let currentData = [];
+        
+        function updateVisualization() {
+            const purposeFilter = document.getElementById('purpose-filter').value;
+            const terrainFilter = document.getElementById('terrain-filter').value;
+            const qualityThreshold = +document.getElementById('quality-slider').value;
+            
+            currentData = trainingData.filter(d => {
+                const matchesPurpose = purposeFilter === 'all' || d.coordinates.z_purpose === purposeFilter;
+                const matchesTerrain = terrainFilter === 'all' || d.coordinates.w_terrain === terrainFilter;
+                const matchesQuality = d.quality_score >= qualityThreshold;
+                return matchesPurpose && matchesTerrain && matchesQuality;
+            });
+            
+            document.getElementById('total-visible').textContent = currentData.length;
+            const avgQuality = currentData.reduce((sum, d) => sum + d.quality_score, 0) / currentData.length;
+            document.getElementById('avg-quality').textContent = avgQuality ? avgQuality.toFixed(1) : '0';
+            const memoirGold = currentData.filter(d => d.quality_score >= 80).length;
+            document.getElementById('memoir-gold').textContent = memoirGold;
+            
+            const themeCounts = {};
+            currentData.forEach(d => {
+                themeCounts[d.theme] = (themeCounts[d.theme] || 0) + 1;
+            });
+            const dominantTheme = Object.entries(themeCounts).sort((a, b) => b[1] - a[1])[0];
+            document.getElementById('dominant-theme').textContent = dominantTheme ? dominantTheme[0] : 'None';
+            
+            const simulation = d3.forceSimulation(currentData)
+                .force('charge', d3.forceManyBody().strength(-30))
+                .force('center', d3.forceCenter(width / 2, height / 2))
+                .force('collision', d3.forceCollide().radius(d => Math.sqrt(d.quality_score) * 2 + 5));
+            
+            svg.selectAll('*').remove();
+            
+            const nodes = svg.selectAll('.node')
+                .data(currentData)
+                .join('circle')
+                .attr('class', 'node')
+                .attr('r', d => Math.sqrt(d.quality_score) * 2 + 3)
+                .attr('fill', d => purposeColors[d.coordinates.z_purpose] || '#999')
+                .attr('opacity', d => {
+                    const terrainOpacity = {
+                        'obvious': 1.0,
+                        'complicated': 0.8,
+                        'complex': 0.7,
+                        'chaotic': 0.5,
+                        'confused': 0.3
+                    };
+                    return terrainOpacity[d.coordinates.w_terrain] || 0.7;
+                })
+                .on('mouseover', showTooltip)
+                .on('mouseout', hideTooltip);
+            
+            simulation.on('tick', () => {
+                nodes
+                    .attr('cx', d => d.x)
+                    .attr('cy', d => d.y);
+            });
+        }
+        
+        function showTooltip(event, d) {
+            const tooltip = document.getElementById('tooltip');
+            
+            const quality = d.quality_score || 0;
+            const coordKey = d.coordinates?.tesseract_key || 'unknown';
+            const theme = d.theme || 'unknown';
+            const words = d.word_count || 0;
+            const file = d.file_path || 'unknown';
+            const xStruct = d.coordinates?.x_structure || 'unknown';
+            const yTrans = d.coordinates?.y_transmission || 'unknown';
+            const zPurp = d.coordinates?.z_purpose || 'unknown';
+            const wTerr = d.coordinates?.w_terrain || 'unknown';
+            const preview = d.content || '';
+            
+            tooltip.innerHTML = `
+                <strong>Quality Score: ${quality.toFixed(1)}</strong><br>
+                <span class="coordinate-display">${coordKey}</span><br><br>
+                <strong>Theme:</strong> ${theme}<br>
+                <strong>Words:</strong> ${words}<br>
+                <strong>File:</strong> ${file.split('/').pop()}<br><br>
+                <em>X-Structure:</em> ${xStruct}<br>
+                <em>Y-Transmission:</em> ${yTrans}<br>
+                <em>Z-Purpose:</em> ${zPurp}<br>
+                <em>W-Terrain:</em> ${wTerr}<br><br>
+                ${preview ? `<div style="font-size: 0.85em; opacity: 0.8;">${preview}</div>` : ''}
+            `;
+            tooltip.style.left = (event.pageX + 10) + 'px';
+            tooltip.style.top = (event.pageY - 10) + 'px';
+            tooltip.classList.add('active');
+        }
+        
+        function hideTooltip() {
+            document.getElementById('tooltip').classList.remove('active');
+        }
+        
+        document.getElementById('purpose-filter').addEventListener('change', updateVisualization);
+        document.getElementById('terrain-filter').addEventListener('change', updateVisualization);
+        document.getElementById('quality-slider').addEventListener('input', (e) => {
+            document.getElementById('quality-value').textContent = e.target.value;
+            updateVisualization();
+        });
+    </script>
+</body>
+</html>"""
+    
+    return HTMLResponse(content=html_content)
 
 @router.get("/api/training/summary")
 async def get_training_summary():

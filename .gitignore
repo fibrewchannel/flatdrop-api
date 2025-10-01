@@ -3,3 +3,6 @@
 *.pyc
 *.pyc
 /tmp
+/venv
+code/.DS_Store
+/code/app/__pycache__
