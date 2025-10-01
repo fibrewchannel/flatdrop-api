@@ -1,5 +1,25 @@
 Tesseract Content Nibbling System - Training Phase Instructions
 Overview
+
+Files proven accessible by Claude:
+
+Core Application Files:
+- https://github.com/fibrewchannel/flatdrop-api/raw/refs/heads/main/code/main.py
+- https://github.com/fibrewchannel/flatdrop-api/raw/refs/heads/main/code/app/routes.py
+- https://github.com/fibrewchannel/flatdrop-api/raw/refs/heads/main/code/app/utils.py
+- https://github.com/fibrewchannel/flatdrop-api/raw/refs/heads/main/code/app/config.py
+- https://github.com/fibrewchannel/flatdrop-api/raw/refs/heads/main/code/app/schemas.py
+- https://github.com/fibrewchannel/flatdrop-api/raw/refs/heads/main/code/app/tesseract_config.py
+- https://github.com/fibrewchannel/flatdrop-api/raw/refs/heads/main/code/app/training_nibbler.py
+- https://github.com/fibrewchannel/flatdrop-api/raw/refs/heads/main/code/app/content_mining.py
+- https://github.com/fibrewchannel/flatdrop-api/raw/refs/heads/main/code/app/single_file_tester.py
+
+Visualization & Documentation:
+- https://github.com/fibrewchannel/flatdrop-api/raw/refs/heads/main/code/visualizations/tesseract_visualizations.html
+- https://github.com/fibrewchannel/flatdrop-api/raw/refs/heads/main/code/README.md
+- https://github.com/fibrewchannel/flatdrop-api/raw/refs/heads/main/claude_instructions.md
+
+
 Goal: Build a "cognitive digestion system" that processes Rick's chaotic files into organized, coordinate-tagged memoir content. Training phase focuses on learning Rick's actual content patterns rather than making assumptions.
 Training Phase Objectives
 
