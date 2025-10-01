@@ -73,6 +73,7 @@ async def serve_tesseract_visualization():
             max-width: 1400px;
             margin: 0 auto;
             padding: 20px;
+            padding-right: 470px; /* Space for inspector panel */
         }
         
         header {
@@ -196,6 +197,124 @@ async def serve_tesseract_visualization():
             opacity: 1;
         }
         
+        #inspector-panel {
+            position: fixed;
+            right: -450px;
+            top: 0;
+            width: 450px;
+            height: 100vh;
+            background: rgba(10,10,30,0.98);
+            border-left: 3px solid #4f9eff;
+            padding: 30px;
+            overflow-y: auto;
+            transition: right 0.3s ease;
+            z-index: 3000;
+            box-shadow: -5px 0 20px rgba(0,0,0,0.5);
+        }
+        
+        #inspector-panel.active {
+            right: 0;
+        }
+        
+        #inspector-panel .close-btn {
+            position: absolute;
+            top: 15px;
+            right: 15px;
+            background: transparent;
+            border: 2px solid #ff6b6b;
+            color: #ff6b6b;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            cursor: pointer;
+            font-size: 24px;
+            line-height: 36px;
+            text-align: center;
+            transition: all 0.3s;
+        }
+        
+        #inspector-panel .close-btn:hover {
+            background: #ff6b6b;
+            color: white;
+            transform: rotate(90deg);
+        }
+        
+        .inspector-section {
+            margin-bottom: 25px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid rgba(79, 158, 255, 0.2);
+        }
+        
+        .inspector-section:last-child {
+            border-bottom: none;
+        }
+        
+        .inspector-section h3 {
+            color: #4f9eff;
+            margin-bottom: 12px;
+            font-size: 1.2em;
+        }
+        
+        .quality-badge {
+            display: inline-block;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 1.4em;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        .quality-high { background: #6bcf7f; color: #000; }
+        .quality-medium { background: #ffd93d; color: #000; }
+        .quality-low { background: #ff6b6b; color: #fff; }
+        
+        .coord-box {
+            background: rgba(0,0,0,0.5);
+            padding: 12px;
+            border-radius: 8px;
+            margin: 8px 0;
+            border-left: 3px solid #4f9eff;
+        }
+        
+        .content-preview {
+            background: rgba(0,0,0,0.3);
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 0.95em;
+            line-height: 1.6;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        
+        .file-link {
+            color: #4f9eff;
+            text-decoration: none;
+            font-family: 'Monaco', monospace;
+            font-size: 0.9em;
+            word-break: break-all;
+        }
+        
+        .obsidian-btn {
+            display: block;
+            width: 100%;
+            padding: 12px;
+            margin-top: 15px;
+            background: linear-gradient(135deg, #7c3aed, #a855f7);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-weight: bold;
+            font-size: 1em;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .obsidian-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(124, 58, 237, 0.4);
+        }
+        
         .legend {
             margin-top: 20px;
             padding: 20px;
@@ -216,12 +335,6 @@ async def serve_tesseract_visualization():
             width: 20px;
             height: 20px;
             border-radius: 50%;
-        }
-        
-        .coordinate-display {
-            font-family: 'Monaco', monospace;
-            font-size: 0.9em;
-            color: #ffd93d;
         }
         
         .status-indicator {
@@ -320,29 +433,30 @@ async def serve_tesseract_visualization():
                 <span>Help World</span>
             </div>
             <div style="margin-left: auto;">
-                <strong>Size</strong> = Quality Score | <strong>Brightness</strong> = Cognitive Terrain
+                <strong>Click bubble</strong> to inspect | <strong>Size</strong> = Quality
             </div>
         </div>
         
         <div class="tooltip" id="tooltip"></div>
     </div>
     
+    <div id="inspector-panel">
+        <button class="close-btn" onclick="closeInspector()">×</button>
+        <div id="inspector-content">
+            <p style="text-align: center; opacity: 0.5; margin-top: 50px;">Click a bubble to inspect details</p>
+        </div>
+    </div>
+    
     <div class="status-indicator" id="status">🔄 Loading data...</div>
     
     <script>
         let trainingData = [];
-        // Use search with no filters to get ALL chunks
         const apiEndpoint = '/api/training/chunks/search?max_results=500&min_score=0';
-        
         const statusEl = document.getElementById('status');
         
-        // Fetch real data from same-origin API (no CORS issues!)
         fetch(apiEndpoint)
             .then(response => response.json())
             .then(data => {
-                console.log('Raw API Response:', data); // DEBUG: See what we got
-                console.log('Total results:', data.results ? data.results.length : 'NO RESULTS');
-                
                 if (data.results && data.results.length > 0) {
                     trainingData = data.results.map(chunk => {
                         const coords = chunk.coordinates || {};
@@ -359,7 +473,7 @@ async def serve_tesseract_visualization():
                             theme: chunk.theme || 'unknown',
                             word_count: chunk.word_count || 0,
                             file_path: chunk.source_file || chunk.file_path || 'unknown',
-                            content: chunk.content ? chunk.content.substring(0, 200) + '...' : ''
+                            content: chunk.content || ''
                         };
                     });
                     
@@ -443,7 +557,8 @@ async def serve_tesseract_visualization():
                     return terrainOpacity[d.coordinates.w_terrain] || 0.7;
                 })
                 .on('mouseover', showTooltip)
-                .on('mouseout', hideTooltip);
+                .on('mouseout', hideTooltip)
+                .on('click', openInspector);
             
             simulation.on('tick', () => {
                 nodes
@@ -454,29 +569,15 @@ async def serve_tesseract_visualization():
         
         function showTooltip(event, d) {
             const tooltip = document.getElementById('tooltip');
-            
             const quality = d.quality_score || 0;
             const coordKey = d.coordinates?.tesseract_key || 'unknown';
             const theme = d.theme || 'unknown';
-            const words = d.word_count || 0;
-            const file = d.file_path || 'unknown';
-            const xStruct = d.coordinates?.x_structure || 'unknown';
-            const yTrans = d.coordinates?.y_transmission || 'unknown';
-            const zPurp = d.coordinates?.z_purpose || 'unknown';
-            const wTerr = d.coordinates?.w_terrain || 'unknown';
-            const preview = d.content || '';
             
             tooltip.innerHTML = `
-                <strong>Quality Score: ${quality.toFixed(1)}</strong><br>
-                <span class="coordinate-display">${coordKey}</span><br><br>
+                <strong>Quality: ${quality.toFixed(1)}</strong><br>
+                <span style="color: #ffd93d; font-family: Monaco; font-size: 0.9em;">${coordKey}</span><br>
                 <strong>Theme:</strong> ${theme}<br>
-                <strong>Words:</strong> ${words}<br>
-                <strong>File:</strong> ${file.split('/').pop()}<br><br>
-                <em>X-Structure:</em> ${xStruct}<br>
-                <em>Y-Transmission:</em> ${yTrans}<br>
-                <em>Z-Purpose:</em> ${zPurp}<br>
-                <em>W-Terrain:</em> ${wTerr}<br><br>
-                ${preview ? `<div style="font-size: 0.85em; opacity: 0.8;">${preview}</div>` : ''}
+                <em style="opacity: 0.7;">Click for full details</em>
             `;
             tooltip.style.left = (event.pageX + 10) + 'px';
             tooltip.style.top = (event.pageY - 10) + 'px';
@@ -487,9 +588,108 @@ async def serve_tesseract_visualization():
             document.getElementById('tooltip').classList.remove('active');
         }
         
+        function openInspector(event, d) {
+            const panel = document.getElementById('inspector-panel');
+            const content = document.getElementById('inspector-content');
+            
+            const quality = d.quality_score || 0;
+            let qualityClass = 'quality-low';
+            let qualityLabel = 'Low Quality';
+            if (quality >= 80) {
+                qualityClass = 'quality-high';
+                qualityLabel = 'Memoir Gold';
+            } else if (quality >= 50) {
+                qualityClass = 'quality-medium';
+                qualityLabel = 'Medium Quality';
+            }
+            
+            content.innerHTML = `
+                <div class="inspector-section">
+                    <div class="quality-badge ${qualityClass}">${quality.toFixed(1)}</div>
+                    <div style="font-size: 0.9em; opacity: 0.8;">${qualityLabel}</div>
+                </div>
+                
+                <div class="inspector-section">
+                    <h3>Tesseract Coordinates</h3>
+                    <div class="coord-box">
+                        <div style="color: #ffd93d; font-family: Monaco; font-size: 1.1em; margin-bottom: 12px;">
+                            ${d.coordinates?.tesseract_key || 'unknown'}
+                        </div>
+                        <div style="font-size: 0.9em; opacity: 0.9; line-height: 1.8;">
+                            <strong>X-Structure:</strong> ${d.coordinates?.x_structure || 'unknown'}<br>
+                            <strong>Y-Transmission:</strong> ${d.coordinates?.y_transmission || 'unknown'}<br>
+                            <strong>Z-Purpose:</strong> ${d.coordinates?.z_purpose || 'unknown'}<br>
+                            <strong>W-Terrain:</strong> ${d.coordinates?.w_terrain || 'unknown'}
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="inspector-section">
+                    <h3>Content Details</h3>
+                    <div style="margin-bottom: 8px;"><strong>Theme:</strong> ${d.theme || 'unknown'}</div>
+                    <div style="margin-bottom: 8px;"><strong>Word Count:</strong> ${d.word_count || 0}</div>
+                    <div style="margin-bottom: 12px;"><strong>Source File:</strong><br>
+                        <span class="file-link">${d.file_path || 'unknown'}</span>
+                    </div>
+                    <button class="obsidian-btn" onclick="openInObsidian('${d.file_path}')">
+                        🔮 Open in Obsidian
+                    </button>
+                </div>
+                
+                <div class="inspector-section">
+                    <h3>Content Preview</h3>
+                    <div class="content-preview">${d.content || 'No preview available'}</div>
+                </div>
+                
+                <div class="inspector-section">
+                    <h3>Memoir Relevance</h3>
+                    <div style="opacity: 0.9; line-height: 1.8;">
+                        ${getMemoirRelevanceText(d.coordinates?.z_purpose, quality)}
+                    </div>
+                </div>
+            `;
+            
+            panel.classList.add('active');
+        }
+        
+        function closeInspector() {
+            document.getElementById('inspector-panel').classList.remove('active');
+        }
+        
+        function getMemoirRelevanceText(purpose, quality) {
+            const purposeTexts = {
+                'tell-story': 'CRITICAL for memoir - this is your story content',
+                'help-addict': 'HIGH value - recovery narratives are central to your memoir',
+                'prevent-death': 'MEDIUM value - survival context adds depth',
+                'financial-amends': 'LOW direct value - but shows responsibility growth',
+                'help-world': 'MEDIUM value - creative/philosophical contributions'
+            };
+            
+            let text = purposeTexts[purpose] || 'Value unclear - review for memoir fit';
+            
+            if (quality >= 80) {
+                text += '<br><br><strong style="color: #6bcf7f;">✨ Memoir Gold</strong> - Definitely include this!';
+            } else if (quality >= 50) {
+                text += '<br><br><strong style="color: #ffd93d;">Worth keeping</strong> for potential memoir use.';
+            }
+            
+            return text;
+        }
+        
+        function openInObsidian(filePath) {
+            if (!filePath || filePath === 'unknown') {
+                alert('File path not available');
+                return;
+            }
+            
+            const vaultName = 'flatline-codex';
+            const encodedPath = encodeURIComponent(filePath);
+            const obsidianUrl = `obsidian://open?vault=${vaultName}&file=${encodedPath}`;
+            window.location.href = obsidianUrl;
+        }
+        
         document.getElementById('purpose-filter').addEventListener('change', updateVisualization);
         document.getElementById('terrain-filter').addEventListener('change', updateVisualization);
-        document.getElementById('view-mode').addEventListener('change', updateVisualization);
         document.getElementById('quality-slider').addEventListener('input', (e) => {
             document.getElementById('quality-value').textContent = e.target.value;
             updateVisualization();
