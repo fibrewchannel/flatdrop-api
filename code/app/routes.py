@@ -48,6 +48,538 @@ async def create_emergency_backup():
             "error": str(e)
         }
 
+
+@router.get("/viz-clusters", response_class=HTMLResponse)
+async def serve_cluster_visualization():
+    """Serve the cluster view"""
+    html_content = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tesseract Cluster View</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            color: #fff;
+            overflow-x: hidden;
+        }
+        
+        #container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        header {
+            text-align: center;
+            padding: 30px 0;
+            background: rgba(0,0,0,0.3);
+            border-radius: 12px;
+            margin-bottom: 30px;
+        }
+        
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #4f9eff, #ff6b6b, #ffd93d);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            background: rgba(0,0,0,0.3);
+            padding: 20px;
+            border-radius: 12px;
+            align-items: center;
+        }
+        
+        .filter-group {
+            flex: 1;
+        }
+        
+        .filter-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #4f9eff;
+        }
+        
+        select {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid rgba(79, 158, 255, 0.3);
+            background: rgba(0,0,0,0.5);
+            color: #fff;
+            border-radius: 8px;
+            font-size: 1em;
+        }
+        
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .stat-card {
+            background: rgba(0,0,0,0.3);
+            padding: 20px;
+            border-radius: 12px;
+            border: 2px solid rgba(79, 158, 255, 0.2);
+        }
+        
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            opacity: 0.7;
+            font-size: 0.9em;
+        }
+        
+        #cluster-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .cluster-box {
+            background: rgba(0,0,0,0.4);
+            border: 2px solid rgba(79, 158, 255, 0.3);
+            border-radius: 12px;
+            padding: 15px;
+            min-height: 250px;
+            position: relative;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .cluster-box:hover {
+            border-color: #4f9eff;
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(79, 158, 255, 0.2);
+        }
+        
+        .cluster-header {
+            margin-bottom: 12px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid rgba(79, 158, 255, 0.2);
+        }
+        
+        .cluster-key {
+            font-family: 'Monaco', monospace;
+            font-size: 0.85em;
+            color: #ffd93d;
+            margin-bottom: 8px;
+            word-break: break-word;
+            line-height: 1.4;
+        }
+        
+        .cluster-count {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #4f9eff;
+        }
+        
+        .cluster-viz {
+            position: relative;
+            height: 150px;
+            overflow: hidden;
+        }
+        
+        .mini-bubble {
+            position: absolute;
+            border-radius: 50%;
+            opacity: 0.8;
+            transition: opacity 0.3s;
+        }
+        
+        .mini-bubble:hover {
+            opacity: 1;
+        }
+        
+        .cluster-stats {
+            margin-top: 10px;
+            font-size: 0.85em;
+            opacity: 0.8;
+        }
+        
+        .quality-bar {
+            height: 4px;
+            background: rgba(79, 158, 255, 0.2);
+            border-radius: 2px;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+        
+        .quality-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ff6b6b, #ffd93d, #6bcf7f);
+            border-radius: 2px;
+            transition: width 0.5s ease;
+        }
+        
+        .tooltip {
+            position: fixed;
+            background: rgba(0,0,0,0.95);
+            border: 2px solid #4f9eff;
+            border-radius: 8px;
+            padding: 12px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 1000;
+            max-width: 300px;
+        }
+        
+        .tooltip.active {
+            opacity: 1;
+        }
+        
+        .chapter-indicator {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #6bcf7f;
+            color: #000;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.75em;
+            font-weight: bold;
+        }
+        
+        .status-indicator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(0,0,0,0.8);
+            padding: 15px;
+            border-radius: 8px;
+            border: 2px solid #4f9eff;
+            z-index: 2000;
+        }
+    </style>
+</head>
+<body>
+    <div id="container">
+        <header>
+            <h1>Tesseract Coordinate Clusters</h1>
+            <p class="subtitle" id="chunk-count">Loading training data...</p>
+            <p style="opacity: 0.8; margin-top: 10px;">Natural content groupings by 4D coordinates</p>
+        </header>
+        
+        <div class="controls">
+            <div class="filter-group">
+                <label>Sort Clusters By</label>
+                <select id="sort-by">
+                    <option value="size">Chunk Count (Largest First)</option>
+                    <option value="quality">Average Quality</option>
+                    <option value="memoir">Memoir Gold Count</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label>Show Only</label>
+                <select id="filter-purpose">
+                    <option value="all">All Purposes</option>
+                    <option value="tell-story">Tell My Story</option>
+                    <option value="help-addict">Help Another Addict</option>
+                    <option value="prevent-death">Prevent Death/Poverty</option>
+                    <option value="financial-amends">Financial Amends</option>
+                    <option value="help-world">Help the World</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label>Minimum Cluster Size</label>
+                <select id="min-size">
+                    <option value="1">Show All (1+)</option>
+                    <option value="5">5+ chunks</option>
+                    <option value="10" selected>10+ chunks (Chapter-sized)</option>
+                    <option value="20">20+ chunks</option>
+                    <option value="50">50+ chunks</option>
+                </select>
+            </div>
+        </div>
+        
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="total-clusters">0</div>
+                <div class="stat-label">Coordinate Clusters</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="chapter-candidates">0</div>
+                <div class="stat-label">Chapter Candidates (20+)</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="largest-cluster">0</div>
+                <div class="stat-label">Largest Cluster</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="avg-cluster-size">0</div>
+                <div class="stat-label">Avg Cluster Size</div>
+            </div>
+        </div>
+        
+        <div id="cluster-grid"></div>
+        
+        <div class="tooltip" id="tooltip"></div>
+    </div>
+    
+    <div class="status-indicator" id="status">Loading data...</div>
+    
+    <script>
+        let trainingData = [];
+        let clusters = {};
+        const apiEndpoint = '/api/training/chunks/search?max_results=500&min_score=0';
+        
+        const purposeColors = {
+            'tell-story': '#ff6b6b',
+            'help-addict': '#4f9eff',
+            'prevent-death': '#ffd93d',
+            'financial-amends': '#6bcf7f',
+            'help-world': '#a78bfa'
+        };
+        
+        fetch(apiEndpoint)
+            .then(response => response.json())
+            .then(data => {
+                if (data.results && data.results.length > 0) {
+                    trainingData = data.results.map(chunk => {
+                        const coords = chunk.coordinates || {};
+                        return {
+                            id: chunk.chunk_id || chunk.id,
+                            coordinates: {
+                                x_structure: coords.x_structure || 'unknown',
+                                y_transmission: coords.y_transmission || 'unknown',
+                                z_purpose: coords.z_purpose || 'tell-story',
+                                w_terrain: coords.w_terrain || 'complex',
+                                tesseract_key: coords.tesseract_key || 'unknown'
+                            },
+                            quality_score: chunk.quality_score || 0,
+                            theme: chunk.theme || 'unknown',
+                            word_count: chunk.word_count || 0,
+                            file_path: chunk.source_file || chunk.file_path || 'unknown'
+                        };
+                    });
+                    
+                    document.getElementById('status').innerHTML = 'Loaded ' + trainingData.length + ' chunks';
+                    document.getElementById('chunk-count').textContent = trainingData.length + ' chunks organized into coordinate clusters';
+                    setTimeout(() => document.getElementById('status').style.opacity = '0', 3000);
+                    
+                    buildClusters();
+                    updateVisualization();
+                }
+            })
+            .catch(error => {
+                console.error('API fetch failed:', error);
+                document.getElementById('status').innerHTML = 'Failed to load data';
+            });
+        
+        function buildClusters() {
+            clusters = {};
+            
+            trainingData.forEach(chunk => {
+                const key = chunk.coordinates.tesseract_key;
+                if (!clusters[key]) {
+                    clusters[key] = {
+                        key: key,
+                        chunks: [],
+                        coordinates: chunk.coordinates,
+                        avgQuality: 0,
+                        memoirGold: 0,
+                        totalWords: 0
+                    };
+                }
+                clusters[key].chunks.push(chunk);
+            });
+            
+            // Calculate stats for each cluster
+            Object.values(clusters).forEach(cluster => {
+                cluster.avgQuality = cluster.chunks.reduce((sum, c) => sum + c.quality_score, 0) / cluster.chunks.length;
+                cluster.memoirGold = cluster.chunks.filter(c => c.quality_score >= 80).length;
+                cluster.totalWords = cluster.chunks.reduce((sum, c) => sum + c.word_count, 0);
+            });
+        }
+        
+        function updateVisualization() {
+            const sortBy = document.getElementById('sort-by').value;
+            const filterPurpose = document.getElementById('filter-purpose').value;
+            const minSize = parseInt(document.getElementById('min-size').value);
+            
+            // Filter clusters
+            let filteredClusters = Object.values(clusters).filter(cluster => {
+                const matchesPurpose = filterPurpose === 'all' || cluster.coordinates.z_purpose === filterPurpose;
+                const meetsMinSize = cluster.chunks.length >= minSize;
+                return matchesPurpose && meetsMinSize;
+            });
+            
+            // Sort clusters
+            filteredClusters.sort((a, b) => {
+                if (sortBy === 'size') return b.chunks.length - a.chunks.length;
+                if (sortBy === 'quality') return b.avgQuality - a.avgQuality;
+                if (sortBy === 'memoir') return b.memoirGold - a.memoirGold;
+                return 0;
+            });
+            
+            // Update stats
+            document.getElementById('total-clusters').textContent = filteredClusters.length;
+            document.getElementById('chapter-candidates').textContent = filteredClusters.filter(c => c.chunks.length >= 20).length;
+            document.getElementById('largest-cluster').textContent = filteredClusters.length > 0 ? filteredClusters[0].chunks.length : 0;
+            const avgSize = filteredClusters.reduce((sum, c) => sum + c.chunks.length, 0) / filteredClusters.length;
+            document.getElementById('avg-cluster-size').textContent = avgSize ? avgSize.toFixed(1) : 0;
+            
+            // Render clusters
+            const grid = document.getElementById('cluster-grid');
+            grid.innerHTML = '';
+            
+            filteredClusters.forEach(cluster => {
+                const box = createClusterBox(cluster);
+                grid.appendChild(box);
+            });
+        }
+        
+        function createClusterBox(cluster) {
+            const box = document.createElement('div');
+            box.className = 'cluster-box';
+            
+            const isChapterCandidate = cluster.chunks.length >= 20;
+            const chapterBadge = isChapterCandidate ? '<div class="chapter-indicator">CHAPTER</div>' : '';
+            
+            const qualityPercent = (cluster.avgQuality / 100) * 100;
+            
+            box.innerHTML = 
+                chapterBadge +
+                '<div class="cluster-header">' +
+                    '<div class="cluster-key">' + cluster.key + '</div>' +
+                    '<div class="cluster-count">' + cluster.chunks.length + ' chunks</div>' +
+                '</div>' +
+                '<div class="cluster-viz" id="viz-' + cluster.key.replace(/[^a-z0-9]/g, '_') + '"></div>' +
+                '<div class="cluster-stats">' +
+                    'Avg Quality: <strong>' + cluster.avgQuality.toFixed(1) + '</strong><br>' +
+                    'Memoir Gold: <strong>' + cluster.memoirGold + '</strong><br>' +
+                    'Total Words: <strong>' + cluster.totalWords.toLocaleString() + '</strong>' +
+                '</div>' +
+                '<div class="quality-bar">' +
+                    '<div class="quality-fill" style="width: ' + qualityPercent + '%"></div>' +
+                '</div>';
+            
+            box.addEventListener('click', () => showClusterDetails(cluster));
+            
+            // Render mini bubbles
+            setTimeout(() => renderMiniBubbles(cluster), 50);
+            
+            return box;
+        }
+        
+        function renderMiniBubbles(cluster) {
+            const vizId = 'viz-' + cluster.key.replace(/[^a-z0-9]/g, '_');
+            const container = document.getElementById(vizId);
+            if (!container) return;
+            
+            const width = container.clientWidth;
+            const height = 150;
+            const color = purposeColors[cluster.coordinates.z_purpose] || '#999';
+            
+            // Simple force simulation for mini bubbles
+            const bubbles = cluster.chunks.map((chunk, i) => {
+                const size = Math.sqrt(chunk.quality_score) * 1.5 + 2;
+                return {
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    r: size,
+                    chunk: chunk
+                };
+            });
+            
+            // Simple physics iteration
+            for (let i = 0; i < 50; i++) {
+                bubbles.forEach((b1, idx1) => {
+                    // Center attraction
+                    b1.x += (width / 2 - b1.x) * 0.02;
+                    b1.y += (height / 2 - b1.y) * 0.02;
+                    
+                    // Collision
+                    bubbles.forEach((b2, idx2) => {
+                        if (idx1 === idx2) return;
+                        const dx = b2.x - b1.x;
+                        const dy = b2.y - b1.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        const minDist = b1.r + b2.r;
+                        if (dist < minDist && dist > 0) {
+                            const angle = Math.atan2(dy, dx);
+                            const overlap = minDist - dist;
+                            b1.x -= Math.cos(angle) * overlap * 0.5;
+                            b1.y -= Math.sin(angle) * overlap * 0.5;
+                        }
+                    });
+                    
+                    // Keep in bounds
+                    b1.x = Math.max(b1.r, Math.min(width - b1.r, b1.x));
+                    b1.y = Math.max(b1.r, Math.min(height - b1.r, b1.y));
+                });
+            }
+            
+            // Render bubbles
+            bubbles.forEach(b => {
+                const bubble = document.createElement('div');
+                bubble.className = 'mini-bubble';
+                bubble.style.left = (b.x - b.r) + 'px';
+                bubble.style.top = (b.y - b.r) + 'px';
+                bubble.style.width = (b.r * 2) + 'px';
+                bubble.style.height = (b.r * 2) + 'px';
+                bubble.style.background = color;
+                
+                bubble.addEventListener('mouseenter', (e) => showBubbleTooltip(e, b.chunk));
+                bubble.addEventListener('mouseleave', hideTooltip);
+                
+                container.appendChild(bubble);
+            });
+        }
+        
+        function showBubbleTooltip(event, chunk) {
+            const tooltip = document.getElementById('tooltip');
+            tooltip.innerHTML = 
+                '<strong>Quality: ' + chunk.quality_score.toFixed(1) + '</strong><br>' +
+                'Theme: ' + chunk.theme + '<br>' +
+                'Words: ' + chunk.word_count;
+            tooltip.style.left = event.pageX + 10 + 'px';
+            tooltip.style.top = event.pageY - 10 + 'px';
+            tooltip.classList.add('active');
+        }
+        
+        function hideTooltip() {
+            document.getElementById('tooltip').classList.remove('active');
+        }
+        
+        function showClusterDetails(cluster) {
+            const summary = 'Cluster: ' + cluster.key + '\\n' +
+                           cluster.chunks.length + ' chunks\\n' +
+                           'Avg Quality: ' + cluster.avgQuality.toFixed(1) + '\\n' +
+                           'Memoir Gold: ' + cluster.memoirGold;
+            alert(summary);
+        }
+        
+        document.getElementById('sort-by').addEventListener('change', updateVisualization);
+        document.getElementById('filter-purpose').addEventListener('change', updateVisualization);
+        document.getElementById('min-size').addEventListener('change', updateVisualization);
+    </script>
+</body>
+</html>"""
+    return HTMLResponse(content=html_content)
+
 @router.get("/viz", response_class=HTMLResponse)
 async def serve_tesseract_visualization():
     """Serve the Tesseract 4D visualization directly from the API (bypasses CORS)"""
