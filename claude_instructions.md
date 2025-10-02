@@ -1,5 +1,12 @@
+The one and only:
+https://claude.ai/public/artifacts/4dc3ccf4-8da5-481f-a111-0f0211f5c1c0
+
+And if The One and Only is Not Available:
+
+=====
 Tesseract Content Nibbling System - Training Phase Instructions
 Overview
+=====
 
 Files proven accessible by Claude:
 
