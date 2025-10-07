@@ -580,6 +580,22 @@ async def serve_cluster_visualization():
 </html>"""
     return HTMLResponse(content=html_content)
 
+
+@router.post("/api/process/incremental")
+async def run_incremental_processing(dry_run: bool = True):
+    """Run incremental processing on _inload directory"""
+    SOURCE_DIR = "/Users/rickshangle/Vaults/flatline-codex/_inload"
+    OUTPUT_BASE = "/Users/rickshangle/Vaults/flatline-codex"
+    BACKUP_DIR = "/Users/rickshangle/Vaults/flatline-codex/_backups"
+    PROCESSED_LOG = "/Users/rickshangle/Vaults/flatline-codex/_relocation_logs/processed_sources.json"
+    
+    processor = IncrementalProcessor(SOURCE_DIR, OUTPUT_BASE, BACKUP_DIR, PROCESSED_LOG)
+    results = processor.process_new_files(dry_run=dry_run)
+    
+    return results
+
+
+
 @router.get("/viz", response_class=HTMLResponse)
 async def serve_tesseract_visualization():
     """Serve the Tesseract 4D visualization directly from the API (bypasses CORS)"""

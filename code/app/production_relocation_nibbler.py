@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Production Relocation Nibbler
-Processes _inload files, extracts chunks, assigns dispositions, relocates to appropriate folders
+Processes _inload files (.md, .txt, .rtf), extracts chunks, assigns dispositions, relocates to appropriate folders
 """
 
 import json
@@ -11,6 +11,14 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
 import shutil
+
+# RTF support
+try:
+    from striprtf.striprtf import rtf_to_text
+    RTF_AVAILABLE = True
+except ImportError:
+    RTF_AVAILABLE = False
+    print("Warning: striprtf not installed. Install with: pip install striprtf --break-system-packages")
 
 # Import existing systems
 from tesseract_config import get_analyzer, get_config
@@ -101,11 +109,44 @@ class ProductionRelocationNibbler:
         print(f"Backup created: {backup_path}")
         return backup_path
     
+    def read_file_content(self, file_path: Path) -> Optional[str]:
+        """Read content from .md, .txt, or .rtf files"""
+        suffix = file_path.suffix.lower()
+        
+        try:
+            if suffix == '.md':
+                # Markdown - read as-is
+                content = file_path.read_text(encoding='utf-8', errors='ignore')
+                return content
+            
+            elif suffix == '.txt':
+                # Plain text - read as-is
+                content = file_path.read_text(encoding='utf-8', errors='ignore')
+                return content
+            
+            elif suffix == '.rtf':
+                # Convert RTF to plain text
+                if not RTF_AVAILABLE:
+                    print(f"Skipping RTF file {file_path.name} - striprtf not installed")
+                    return None
+                
+                rtf_content = file_path.read_text(encoding='utf-8', errors='ignore')
+                plain_text = rtf_to_text(rtf_content)
+                return plain_text
+            
+            else:
+                print(f"Unsupported file type: {suffix}")
+                return None
+                
+        except Exception as e:
+            print(f"Error reading {file_path}: {e}")
+            return None
+    
     def generate_chunk_id(self) -> str:
         """Generate unique chunk ID with timestamp"""
         timestamp = datetime.now().strftime("%Y%m%d-%H%M")
         self.chunk_counter += 1
-        return f"{timestamp}-chunk-{self.chunk_counter:03d}"
+        return f"{timestamp}-chunk-{self.chunk_counter:04d}"
     
     def determine_disposition(self, quality_score: float) -> Dict[str, Any]:
         """Map quality score to disposition and destination"""
@@ -190,11 +231,17 @@ class ProductionRelocationNibbler:
     
     def extract_chunks_from_file(self, file_path: Path) -> List[Dict[str, Any]]:
         """Extract one or more chunks from source file"""
-        content = file_path.read_text(encoding='utf-8', errors='ignore')
+        content = self.read_file_content(file_path)
+        
+        if content is None:
+            return []
         
         # Pre-clean content
         content = self.pre_clean_content(content)
         word_count = len(content.split())
+        
+        if word_count < 10:  # Skip empty/tiny files
+            return []
         
         # Analyze content
         patterns = self.analyzer.extract_content_patterns(content)
@@ -547,34 +594,71 @@ annotations: {metadata.annotations or 'null'}
         
         return batch_summary
     
+    def analyze_score_distribution(self, sample_size: int = 50) -> Dict[str, Any]:
+        """Analyze actual quality scores from sample files"""
+        # Get all processable files
+        md_files = list(self.source_dir.rglob("*.md"))
+        txt_files = list(self.source_dir.rglob("*.txt"))
+        rtf_files = list(self.source_dir.rglob("*.rtf")) if RTF_AVAILABLE else []
+        all_files = (md_files + txt_files + rtf_files)[:sample_size]
+        
+        all_scores = []
+        
+        for file_path in all_files:
+            chunks = self.extract_chunks_from_file(file_path)
+            for chunk in chunks:
+                all_scores.append(chunk["quality_score"])
+        
+        if not all_scores:
+            return {"error": "No scores collected"}
+        
+        all_scores.sort()
+        
+        return {
+            "min": min(all_scores),
+            "max": max(all_scores),
+            "median": all_scores[len(all_scores)//2],
+            "p65": all_scores[int(len(all_scores) * 0.65)],
+            "p80": all_scores[int(len(all_scores) * 0.80)],
+            "p90": all_scores[int(len(all_scores) * 0.90)],
+            "sample_scores": all_scores
+        }
+    
     def process_all_inload(self, batch_size: int = 10, dry_run: bool = False, limit: int = None) -> Dict[str, Any]:
         """Process all files in _inload directory"""
         
         if dry_run:
-            print("\nDRY RUN MODE - Analyzing but not moving files\n")
+            print("\n🔍 DRY RUN MODE - Analyzing but not moving files\n")
         else:
             # Create backup before processing
             backup_path = self.create_backup()
         
-        # Get all .md files in _inload
+        # Get all processable files in _inload
         md_files = list(self.source_dir.rglob("*.md"))
+        txt_files = list(self.source_dir.rglob("*.txt"))
+        rtf_files = list(self.source_dir.rglob("*.rtf")) if RTF_AVAILABLE else []
         
-        if not md_files:
-            print(f"No .md files found in {self.source_dir}")
+        all_files = md_files + txt_files + rtf_files
+        
+        if not all_files:
+            print(f"❌ No processable files found in {self.source_dir}")
             return {}
         
         # Limit for dry run or testing
         if limit:
-            md_files = md_files[:limit]
+            all_files = all_files[:limit]
         
-        print(f"Found {len(md_files)} files to process")
+        print(f"📂 Found {len(all_files)} files to process")
+        print(f"   - .md: {len([f for f in all_files if f.suffix == '.md'])}")
+        print(f"   - .txt: {len([f for f in all_files if f.suffix == '.txt'])}")
+        print(f"   - .rtf: {len([f for f in all_files if f.suffix == '.rtf'])}")
         
         # Process in batches
         all_batch_summaries = []
         batch_id = 1
         
-        for i in range(0, len(md_files), batch_size):
-            batch_files = md_files[i:i + batch_size]
+        for i in range(0, len(all_files), batch_size):
+            batch_files = all_files[i:i + batch_size]
             batch_summary = self.process_batch(batch_files, batch_id, dry_run=dry_run)
             all_batch_summaries.append(batch_summary)
             batch_id += 1
@@ -636,8 +720,9 @@ def main():
     print("=" * 60)
     print("PRODUCTION RELOCATION NIBBLER")
     print("=" * 60)
+    print("\nSupports: .md, .txt, .rtf files")
     
-    mode = input("\nChoose mode:\n  1. Dry run (3 files)\n  2. Dry run (full)\n  3. REAL run (full)\nChoice: ")
+    mode = input("\nChoose mode:\n  1. Dry run (3 files)\n  2. Dry run (full)\n  3. REAL run (full)\n  4. Analyze score distribution\nChoice: ")
     
     if mode == "1":
         results = nibbler.process_all_inload(batch_size=10, dry_run=True, limit=3)
@@ -650,6 +735,16 @@ def main():
         else:
             print("Cancelled")
             return
+    elif mode == "4":
+        print("\nAnalyzing score distribution from 50 files...")
+        distribution = nibbler.analyze_score_distribution(sample_size=50)
+        print(f"\nScore Distribution:")
+        print(f"  Min: {distribution['min']:.1f}")
+        print(f"  Median: {distribution['median']:.1f}")
+        print(f"  65th percentile: {distribution['p65']:.1f}")
+        print(f"  80th percentile: {distribution['p80']:.1f}")
+        print(f"  90th percentile: {distribution['p90']:.1f}")
+        print(f"  Max: {distribution['max']:.1f}")
     else:
         print("Invalid choice")
         return
