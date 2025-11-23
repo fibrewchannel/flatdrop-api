@@ -49,6 +49,59 @@ async def create_emergency_backup():
         }
 
 
+@router.get("/api/chunks/review-batch")
+async def get_smart_review_batch(
+    batch_size: int = 10,
+    focus_area: str = "memoir-priority"  # memoir-priority, recovery, survival, etc.
+):
+    """
+    Get a smart batch of chunks that need human review,
+    pre-sorted by AI analysis with suggested tags
+    """
+
+    # Load chunks from training output
+    training_dir = Path("/Users/rickshangle/Vaults/flatline-codex/_training_output")
+    all_chunks = []
+
+    for batch_dir in (training_dir / "batch_outputs").glob("batch_*"):
+        chunks_file = batch_dir / "extracted_chunks.json"
+        if chunks_file.exists():
+            with open(chunks_file, 'r') as f:
+                all_chunks.extend(json.load(f))
+
+    # Filter by focus area and quality threshold
+    if focus_area == "memoir-priority":
+        candidates = [c for c in all_chunks if c.get('quality_score', 0) >= 50]
+        candidates.sort(key=lambda x: x['quality_score'], reverse=True)
+    elif focus_area == "recovery":
+        candidates = [c for c in all_chunks if 'recovery' in c.get('theme', '')]
+    # ... other focus areas
+
+    # Take batch
+    batch = candidates[:batch_size]
+
+    # Enrich with AI suggestions
+    enriched_batch = []
+    for chunk in batch:
+        coords = chunk.get('coordinates', {})
+
+        suggested_tags = generate_smart_tags(chunk)
+        suggested_destination = suggest_chunk_destination(coords, chunk['quality_score'])
+
+        enriched_batch.append({
+            **chunk,
+            'suggested_tags': suggested_tags,
+            'suggested_destination': suggested_destination,
+            'review_notes': generate_review_notes(chunk)
+        })
+
+    return {
+        'batch_size': len(enriched_batch),
+        'focus_area': focus_area,
+        'chunks': enriched_batch,
+        'remaining_count': len(candidates) - batch_size
+    }
+
 @router.get("/viz-clusters", response_class=HTMLResponse)
 async def serve_cluster_visualization():
     """Serve the cluster view"""
@@ -4349,6 +4402,300 @@ async def scan_inload_content():
             "message": "Failed to scan _inload content"
         }
 
+# Add these endpoints to your app/routes.py file
+# Insert after the training endpoints section
+
+@router.post("/api/chunks/create-review-queue")
+async def create_review_queue():
+    """
+    Create a prioritized review queue of chunks needing human attention
+    """
+    
+    training_dir = Path("/Users/rickshangle/Vaults/flatline-codex/_training_output")
+    review_queue = []
+    
+    # Load all chunks
+    for batch_dir in (training_dir / "batch_outputs").glob("batch_*"):
+        chunks_file = batch_dir / "extracted_chunks.json"
+        if chunks_file.exists():
+            with open(chunks_file, 'r') as f:
+                chunks = json.load(f)
+            
+            for chunk in chunks:
+                review_priority = calculate_review_priority(chunk)
+                
+                if review_priority > 0:  # Needs some level of review
+                    review_queue.append({
+                        'chunk': chunk,
+                        'priority': review_priority,
+                        'review_reason': get_review_reason(chunk),
+                        'ai_suggestions': {
+                            'tags': generate_smart_tags(chunk),
+                            'destination': suggest_chunk_destination(
+                                chunk.get('coordinates', {}),
+                                chunk.get('quality_score', 0)
+                            ),
+                            'confidence': calculate_tagging_confidence(chunk)
+                        }
+                    })
+    
+    # Sort by priority
+    review_queue.sort(key=lambda x: x['priority'], reverse=True)
+    
+    # Save queue
+    queue_file = training_dir / "review_queue.json"
+    with open(queue_file, 'w') as f:
+        json.dump(review_queue, f, indent=2)
+    
+    return {
+        'total_items': len(review_queue),
+        'high_priority': len([x for x in review_queue if x['priority'] >= 0.8]),
+        'medium_priority': len([x for x in review_queue if 0.5 <= x['priority'] < 0.8]),
+        'low_priority': len([x for x in review_queue if x['priority'] < 0.5]),
+        'queue_file': str(queue_file)
+    }
+@router.get("/api/chunks/review-queue")
+async def get_review_queue(
+    priority_filter: str = "all",  # all, critical, high, medium, low
+    limit: int = 50
+):
+    """
+    Get items from the review queue with optional filtering
+    """
+    training_dir = Path("/Users/rickshangle/Vaults/flatline-codex/_training_output")
+    queue_file = training_dir / "review_queue.json"
+
+    if not queue_file.exists():
+        return {
+            'status': 'error',
+            'message': 'Review queue not found. Run POST /api/chunks/create-review-queue first',
+            'suggestion': 'curl -X POST http://localhost:5050/api/chunks/create-review-queue'
+        }
+
+    try:
+        with open(queue_file, 'r') as f:
+            queue = json.load(f)
+
+        # Apply priority filter
+        if priority_filter == "critical":
+            filtered = [x for x in queue if x['priority'] >= 0.8]
+        elif priority_filter == "high":
+            filtered = [x for x in queue if 0.6 <= x['priority'] < 0.8]
+        elif priority_filter == "medium":
+            filtered = [x for x in queue if 0.4 <= x['priority'] < 0.6]
+        elif priority_filter == "low":
+            filtered = [x for x in queue if x['priority'] < 0.4]
+        else:
+            filtered = queue
+
+        # Limit results
+        filtered = filtered[:limit]
+
+        return {
+            'status': 'success',
+            'total_in_queue': len(queue),
+            'filtered_count': len(filtered),
+            'priority_filter': priority_filter,
+            'items': filtered
+        }
+
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': str(e),
+            'message': 'Failed to load review queue'
+        }
+
+
+@router.get("/api/chunks/review-batch")
+async def get_review_batch(
+    batch_size: int = 10,
+    priority_filter: str = "high"  # critical, high, medium, low
+):
+    """
+    Get a smart batch of chunks for human review with AI suggestions
+    """
+    training_dir = Path("/Users/rickshangle/Vaults/flatline-codex/_training_output")
+    queue_file = training_dir / "review_queue.json"
+
+    if not queue_file.exists():
+        return {
+            'status': 'error',
+            'message': 'Review queue not found. Create it first.',
+            'create_queue_endpoint': 'POST /api/chunks/create-review-queue'
+        }
+
+    try:
+        with open(queue_file, 'r') as f:
+            queue = json.load(f)
+
+        # Filter by priority
+        if priority_filter == "critical":
+            candidates = [x for x in queue if x['priority'] >= 0.8]
+        elif priority_filter == "high":
+            candidates = [x for x in queue if 0.6 <= x['priority'] < 0.8]
+        elif priority_filter == "medium":
+            candidates = [x for x in queue if 0.4 <= x['priority'] < 0.6]
+        elif priority_filter == "low":
+            candidates = [x for x in queue if x['priority'] < 0.4]
+        else:
+            candidates = queue
+
+        # Take batch
+        batch = candidates[:batch_size]
+
+        return {
+            'status': 'success',
+            'batch_size': len(batch),
+            'priority_filter': priority_filter,
+            'remaining_in_filter': len(candidates) - batch_size,
+            'total_remaining': len(queue),
+            'chunks': batch,
+            'review_instructions': {
+                'for_each_chunk': [
+                    'Review content_preview',
+                    'Check AI suggested_tags',
+                    'Verify suggested_destination makes sense',
+                    'Decide: keep, modify, or reject'
+                ],
+                'actions': {
+                    'approve': 'Accept AI suggestions as-is',
+                    'modify': 'Change tags/destination before applying',
+                    'reject': 'Mark for archive/trash'
+                }
+            }
+        }
+
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': str(e),
+            'message': 'Failed to create review batch'
+        }
+
+
+@router.post("/api/chunks/approve-batch")
+async def approve_review_batch(decisions: dict):
+    """
+    Apply human decisions from a review batch
+
+    Expected format:
+    {
+        "decisions": [
+            {
+                "chunk_id": "...",
+                "action": "approve|modify|reject",
+                "tags": [...],  # if modified
+                "destination": "..."  # if modified
+            }
+        ]
+    }
+    """
+
+    results = {
+        'approved': [],
+        'modified': [],
+        'rejected': [],
+        'errors': []
+    }
+
+    for decision in decisions.get('decisions', []):
+        try:
+            chunk_id = decision['chunk_id']
+            action = decision['action']
+
+            if action == 'approve':
+                results['approved'].append(chunk_id)
+                # TODO: Apply tags and move to destination
+
+            elif action == 'modify':
+                results['modified'].append({
+                    'chunk_id': chunk_id,
+                    'new_tags': decision.get('tags', []),
+                    'new_destination': decision.get('destination', '')
+                })
+                # TODO: Apply modified tags and move
+
+            elif action == 'reject':
+                results['rejected'].append(chunk_id)
+                # TODO: Move to archive/trash
+
+        except Exception as e:
+            results['errors'].append({
+                'chunk_id': decision.get('chunk_id', 'unknown'),
+                'error': str(e)
+            })
+
+    return {
+        'status': 'success',
+        'summary': {
+            'approved_count': len(results['approved']),
+            'modified_count': len(results['modified']),
+            'rejected_count': len(results['rejected']),
+            'error_count': len(results['errors'])
+        },
+        'details': results,
+        'note': 'Actual file operations not yet implemented - this is showing what would happen'
+    }
+
+
+@router.get("/api/chunks/review-stats")
+async def get_review_statistics():
+    """
+    Get statistics about the review queue and progress
+    """
+    training_dir = Path("/Users/rickshangle/Vaults/flatline-codex/_training_output")
+    queue_file = training_dir / "review_queue.json"
+
+    if not queue_file.exists():
+        return {
+            'status': 'error',
+            'message': 'Review queue not found'
+        }
+
+    try:
+        with open(queue_file, 'r') as f:
+            queue = json.load(f)
+
+        # Calculate stats
+        total = len(queue)
+        by_priority = {
+            'critical': len([x for x in queue if x['priority'] >= 0.8]),
+            'high': len([x for x in queue if 0.6 <= x['priority'] < 0.8]),
+            'medium': len([x for x in queue if 0.4 <= x['priority'] < 0.6]),
+            'low': len([x for x in queue if x['priority'] < 0.4])
+        }
+
+        by_purpose = Counter(x['coordinates']['z_purpose'] for x in queue)
+        by_theme = Counter(x.get('chunk_id', 'unknown').split('-')[0] for x in queue)
+
+        quality_scores = [x['quality_score'] for x in queue]
+        avg_quality = sum(quality_scores) / len(quality_scores) if quality_scores else 0
+
+        return {
+            'status': 'success',
+            'total_items': total,
+            'by_priority': by_priority,
+            'by_purpose': dict(by_purpose.most_common(5)),
+            'quality_stats': {
+                'average': round(avg_quality, 1),
+                'min': min(quality_scores) if quality_scores else 0,
+                'max': max(quality_scores) if quality_scores else 0,
+                'memoir_gold': len([x for x in queue if x['quality_score'] >= 80])
+            },
+            'estimated_review_time': {
+                'critical_items': f"{by_priority['critical'] * 2} minutes (2 min each)",
+                'high_items': f"{by_priority['high'] * 1} minutes (1 min each)",
+                'total_high_priority': f"{by_priority['critical'] * 2 + by_priority['high']} minutes"
+            }
+        }
+
+    except Exception as e:
+        return {
+            'status': 'error',
+            'error': str(e)
+        }
+
 @router.get("/api/inload/priority-files")
 async def get_priority_inload_files(category: str = "high_value", limit: int = 20):
     """Get priority files from specific category for manual review"""
@@ -4570,72 +4917,6 @@ async def archive_low_priority_content():
             "error": str(e),
             "message": "Archive operation failed"
         }
-
-@router.get("/api/inload/mining-dashboard")
-async def get_mining_dashboard():
-    """Get comprehensive dashboard of _inload mining status"""
-    from .content_mining import InloadContentMiner
-    
-    try:
-        # Quick scan
-        miner = InloadContentMiner(VAULT_PATH)
-        signatures = miner.scan_all_inload_content()
-        miner.classify_content()
-        
-        # Calculate metrics
-        total_files = len(signatures)
-        total_words = sum(sig['word_count'] for sig in signatures.values())
-        
-        # Quality distribution
-        quality_distribution = defaultdict(int)
-        for sig in signatures.values():
-            quality_range = f"{int(sig['quality_score'])}-{int(sig['quality_score'])+1}"
-            quality_distribution[quality_range] += 1
-        
-        # Theme distribution
-        theme_distribution = defaultdict(int)
-        for sig in signatures.values():
-            theme_distribution[sig['dominant_theme']] += 1
-        
-        # Calculate processing recommendations
-        high_priority_count = len(miner.mining_results["high_value"]) + len(miner.mining_results["memoir_gold"])
-        medium_priority_count = len(miner.mining_results["recovery_threads"]) + len(miner.mining_results["job_survival"])
-        archive_candidate_count = len(miner.mining_results["archive_candidates"])
-        
-        return {
-            "status": "success",
-            "overview": {
-                "total_files": total_files,
-                "total_words": total_words,
-                "avg_quality": round(sum(sig['quality_score'] for sig in signatures.values()) / total_files, 2) if total_files > 0 else 0
-            },
-            "distributions": {
-                "quality": dict(quality_distribution),
-                "themes": dict(theme_distribution)
-            },
-            "processing_recommendations": {
-                "high_priority": high_priority_count,
-                "medium_priority": medium_priority_count,
-                "archive_candidates": archive_candidate_count,
-                "processing_order": [
-                    f"1. Review {high_priority_count} high-priority files first",
-                    f"2. Process {medium_priority_count} medium-priority files",
-                    f"3. Consider archiving {archive_candidate_count} low-quality files"
-                ]
-            },
-            "classifications": {
-                category: len(files)
-                for category, files in miner.mining_results.items()
-            }
-        }
-        
-    except Exception as e:
-        return {
-            "status": "error",
-            "error": str(e),
-            "message": "Failed to generate mining dashboard"
-        }
-# Add these endpoints to your routes.py
 
 @router.post("/api/snippets/analyze")
 async def analyze_snippet_quality(quality_threshold: int = 20):
@@ -4888,3 +5169,858 @@ def calculate_extraction_efficiency(snippet_analysis):
         "total_extracted": total,
         "assessment": "Excellent" if efficiency >= 50 else "Good" if efficiency >= 25 else "Poor" if efficiency >= 10 else "Very Poor"
     }
+@router.get("/", response_class=HTMLResponse)
+async def serve_api_documentation():
+    """Serve API documentation at root endpoint"""
+    html_content = """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flatline Codex API Documentation</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Monaco', monospace, sans-serif;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            color: #e0e0e0;
+            line-height: 1.6;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(0,0,0,0.4);
+            border-radius: 12px;
+            padding: 40px;
+            border: 2px solid rgba(79, 158, 255, 0.3);
+        }
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #4f9eff, #ff6b6b, #ffd93d);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        h2 {
+            color: #4f9eff;
+            margin-top: 40px;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid rgba(79, 158, 255, 0.3);
+        }
+        .subtitle { font-size: 1.2em; opacity: 0.8; margin-bottom: 30px; }
+        .endpoint {
+            background: rgba(0,0,0,0.3);
+            border-left: 4px solid #4f9eff;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 8px;
+        }
+        .endpoint-header {
+            font-family: 'Monaco', monospace;
+            font-weight: bold;
+            color: #6bcf7f;
+            margin-bottom: 8px;
+        }
+        .method {
+            display: inline-block;
+            background: #ff6b6b;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            margin-right: 10px;
+        }
+        .method.get { background: #6bcf7f; }
+        .method.post { background: #4f9eff; }
+        .endpoint-path { color: #ffd93d; }
+        .endpoint-desc { color: #e0e0e0; margin-top: 5px; }
+        .params {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 8px;
+            font-size: 0.9em;
+            font-family: 'Monaco', monospace;
+        }
+        .example {
+            background: rgba(107, 207, 127, 0.1);
+            border-left: 3px solid #6bcf7f;
+            padding: 10px;
+            margin-top: 8px;
+            font-size: 0.85em;
+            font-family: 'Monaco', monospace;
+            color: #b0e0b0;
+        }
+        .example-label {
+            color: #6bcf7f;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .quick-links {
+            background: rgba(79, 158, 255, 0.1);
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+        }
+        .quick-links a {
+            color: #4f9eff;
+            text-decoration: none;
+            margin-right: 20px;
+            font-weight: bold;
+        }
+        .quick-links a:hover { color: #6bcf7f; text-decoration: underline; }
+        .highlight-box {
+            background: rgba(255, 215, 61, 0.1);
+            border-left: 4px solid #ffd93d;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+        code {
+            background: rgba(0,0,0,0.5);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Monaco', monospace;
+            color: #6bcf7f;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎲 Flatline Codex API</h1>
+        <p class="subtitle">Rick's 4D Memoir Organization System</p>
+        
+        <div class="quick-links">
+            <strong>Quick Access:</strong>
+            <a href="/viz">4D Visualization</a>
+            <a href="/viz-clusters">Cluster View</a>
+            <a href="/docs">OpenAPI Docs</a>
+        </div>
+        
+        <div class="highlight-box">
+            <strong>🔥 Most Used Endpoints:</strong><br>
+            <code>GET /viz</code> - Interactive 4D content explorer<br>
+            <code>GET /api/tesseract/memoir-readiness</code> - Check memoir production status<br>
+            <code>GET /api/inload/mining-dashboard</code> - View unprocessed content<br>
+            <code>GET /api/tags/consolidation-status</code> - Tag cleanup progress
+        </div>
+        
+        <h2>Visualization & Dashboard</h2>
+        
+        <div class="endpoint">
+            <div class="endpoint-header">
+                <span class="method get">GET</span>
+                <span class="endpoint-path">/viz</span>
+            </div>
+            <div class="endpoint-desc">
+                Interactive bubble chart showing content across Structure × Transmission × Purpose × Terrain dimensions.
+            </div>
+            <div class="example">
+                <div class="example-label">Example:</div>
+                http://localhost:5050/viz
+            </div>
+        </div>
+        
+        <div class="endpoint">
+            <div class="endpoint-header">
+                <span class="method get">GET</span>
+                <span class="endpoint-path">/viz-clusters</span>
+            </div>
+            <div class="endpoint-desc">
+                Cluster visualization showing natural content groupings by 4D coordinates with quality metrics.
+            </div>
+            <div class="example">
+                <div class="example-label">Example:</div>
+                http://localhost:5050/viz-clusters
+            </div>
+        </div>
+        
+        <h2>Training Data Analysis</h2>
+        
+        <div class="endpoint">
+            <div class="endpoint-header">
+                <span class="method get">GET</span>
+                <span class="endpoint-path">/api/training/summary</span>
+            </div>
+            <div class="endpoint-desc">
+                Overall training results from 30-file analysis including quality distributions and memoir potential.
+            </div>
+            <div class="example">
+                <div class="example-label">Example:</div>
+                curl http://localhost:5050/api/training/summary
+            </div>
+        </div>
+        
+        <div class="endpoint">
+            <div class="endpoint-header">
+                <span class="method get">GET</span>
+                <span class="endpoint-path">/api/training/high-quality</span>
+            </div>
+            <div class="endpoint-desc">
+                Fetch chunks above quality threshold, optionally filtered by theme.
+            </div>
+            <div class="params">min_score (60), max_results (50), theme_filter (optional)</div>
+            <div class="example">
+                <div class="example-label">Example:</div>
+                curl "http://localhost:5050/api/training/high-quality?min_score=80&max_results=20"
+            </div>
+        </div>
+        
+        <div class="endpoint">
+            <div class="endpoint-header">
+                <span class="method get">GET</span>
+                <span class="endpoint-path">/api/training/chunks/search</span>
+            </div>
+            <div class="endpoint-desc">
+                Search training chunks with multiple filters: text, theme, quality, coordinates.
+            </div>
+            <div class="params">query, theme, min_score, coordinate, max_results (100)</div>
+            <div class="example">
+                <div class="example-label">Example:</div>
+                curl "http://localhost:5050/api/training/chunks/search?query=recovery&min_score=50"
+            </div>
+        </div>
+        
+        <h2>Tag Management</h2>
+        
+        <div class="endpoint">
+            <div class="endpoint-header">
+                <span class="method get">GET</span>
+                <span class="endpoint-path">/api/tags/audit</span>
+            </div>
+            <div class="endpoint-desc">
+                Comprehensive tag analysis: total tags, instances, top 50, unique list.
+            </div>
+            <div class="example">
+                <div class="example-label">Example:</div>
+                curl http://localhost:5050/api/tags/audit
+            </div>
+        </div>
+        
+        <div class="endpoint">
+            <div class="endpoint-header">
+                <span class="method get">GET</span>
+                <span class="endpoint-path">/api/tags/consolidation-status</span>
+            </div>
+            <div class="endpoint-desc">
+                Current tag consolidation status with completeness percentage and next steps.
+            </div>
+            <div class="example">
+                <div class="example-label">Example:</div>
+                curl http://localhost:5050/api/tags/consolidation-status
+            </div>
+        </div>
+        
+        <div class="endpoint">
+            <div class="endpoint-header">
+                <span class="method post">POST</span>
+                <span class="endpoint-path">/api/tags/consolidate</span>
+            </div>
+            <div class="endpoint-desc">
+                Consolidate tags redundant with Tesseract coordinates.
+            </div>
+            <div class="params">dry_run (true)</div>
+            <div class="example">
+                <div class="example-label">Example (dry run):</div>
+                curl -X POST "http://localhost:5050/api/tags/consolidate?dry_run=true"
+                <div style="margin-top: 5px;">
+                <div class="example-label">Example (execute):</div>
+                curl -X POST "http://localhost:5050/api/tags/consolidate?dry_run=false"
+                </div>
+            </div>
+        </div>
+        
+        <div class="endpoint">
+            <div class="endpoint-header">
+                <span class="method post">POST</span>
+                <span class="endpoint-path">/api/tags/execute-technical-cleanup</span>
+            </div>
+            <div class="endpoint-desc">
+                Remove technical artifacts and standardize formats.
+            </div>
+            <div class="params">dry_run (true)</div>
+            <div class="example">
+                <div class="example-label">Example:</div>
+                curl -X POST "http://localhost:5050/api/tags/execute-technical-cleanup?dry_run=true"
+            </div>
+        </div>
+        
+        <h2>Tesseract 4D System</h2>
+        
+        <div class="highlight-box">
+            <strong>4D Dimensions:</strong><br>
+            <strong>X (Structure):</strong> archetype, protocol, shadowcast, expansion, summoning<br>
+            <strong>Y (Transmission):</strong> narrative, text, reference, data<br>
+            <strong>Z (Purpose):</strong> tell-story, help-addict, prevent-death, financial-amends, help-world<br>
+            <strong>W (Terrain):</strong> obvious, complicated, complex, chaotic, confused
+        </div>
+        
+        <div class="endpoint">
+            <div class="endpoint-header">
+                <span class="method post">POST</span>
+                <span class="endpoint-path">/api/tesseract/extract-coordinates</span>
+            </div>
+            <div class="endpoint-desc">
+                Map entire codex into 4D space with dimensional distributions and memoir spine candidates.
+            </div>
+            <div class="example">
+                <div class="example-label">Example:</div>
+                curl -X POST http://localhost:5050/api/tesseract/extract-coordinates
+            </div>
+        </div>
+        
+        <div class="endpoint">
+            <div class="endpoint-header">
+                <span class="method get">GET</span>
+                <span class="endpoint-path">/api/tesseract/memoir-readiness</span>
+            </div>
+            <div class="endpoint-desc">
+                Comprehensive memoir readiness using 4D analysis with production recommendations.
+            </div>
+            <div class="example">
+                <div class="example-label">Example:</div>
+                curl http://localhost:5050/api/tesseract/memoir-readiness
+            </div>
+        </div>
+        
+        <h2>Content Analysis</h2>
+        
+        <div class="endpoint">
+            <div class="endpoint-header">
+                <span class="method post">POST</span>
+                <span class="endpoint-path">/api/analysis/content-fingerprint</span>
+            </div>
+            <div class="endpoint-desc">
+                Create content fingerprints: document archetypes, structural signatures, cross-references.
+            </div>
+            <div class="example">
+                <div class="example-label">Example:</div>
+                curl -X POST http://localhost:5050/api/analysis/content-fingerprint
+            </div>
+        </div>
+        
+        <div class="endpoint">
+            <div class="endpoint-header">
+                <span class="method get">GET</span>
+                <span class="endpoint-path">/api/analysis/memoir-readiness</span>
+            </div>
+            <div class="endpoint-desc">
+                Assess memoir production readiness with content inventory and missing chapters.
+            </div>
+            <div class="example">
+                <div class="example-label">Example:</div>
+                curl http://localhost:5050/api/analysis/memoir-readiness
+            </div>
+        </div>
+        
+        <h2>_inload Content Mining</h2>
+        
+        <div class="endpoint">
+            <div class="endpoint-header">
+                <span class="method get">GET</span>
+                <span class="endpoint-path">/api/inload/mining-dashboard</span>
+            </div>
+            <div class="endpoint-desc">
+                Comprehensive _inload status: quality distribution, themes, processing recommendations.
+            </div>
+            <div class="example">
+                <div class="example-label">Example:</div>
+                curl http://localhost:5050/api/inload/mining-dashboard
+            </div>
+        </div>
+        
+        <div class="endpoint">
+            <div class="endpoint-header">
+                <span class="method post">POST</span>
+                <span class="endpoint-path">/api/inload/scan-content</span>
+            </div>
+            <div class="endpoint-desc">
+                Scan all _inload directories with classifications: high_value, memoir_gold, recovery_threads.
+            </div>
+            <div class="example">
+                <div class="example-label">Example:</div>
+                curl -X POST http://localhost:5050/api/inload/scan-content
+            </div>
+        </div>
+        
+        <div class="endpoint">
+            <div class="endpoint-header">
+                <span class="method get">GET</span>
+                <span class="endpoint-path">/api/inload/priority-files</span>
+            </div>
+            <div class="endpoint-desc">
+                Get priority files from category for manual review.
+            </div>
+            <div class="params">category (high_value), limit (20)</div>
+            <div class="example">
+                <div class="example-label">Example:</div>
+                curl "http://localhost:5050/api/inload/priority-files?category=memoir_gold&limit=10"
+            </div>
+        </div>
+        
+        <div class="endpoint">
+            <div class="endpoint-header">
+                <span class="method post">POST</span>
+                <span class="endpoint-path">/api/inload/batch-move</span>
+            </div>
+            <div class="endpoint-desc">
+                Batch move files with backup. Body: [{source_path, destination_path}]
+            </div>
+            <div class="example">
+                <div class="example-label">Example:</div>
+                curl -X POST http://localhost:5050/api/inload/batch-move \\<br>
+                &nbsp;&nbsp;-H "Content-Type: application/json" \\<br>
+                &nbsp;&nbsp;-d '{"moves":[{"source_path":"_inload/file1.md","destination_path":"memoir/file1.md"}]}'
+            </div>
+        </div>
+        
+        <h2>Snippet Processing</h2>
+        
+        <div class="endpoint">
+            <div class="endpoint-header">
+                <span class="method post">POST</span>
+                <span class="endpoint-path">/api/snippets/analyze</span>
+            </div>
+            <div class="endpoint-desc">
+                Analyze ChatGPT snippet quality and suggest reorganization.
+            </div>
+            <div class="params">quality_threshold (20)</div>
+            <div class="example">
+                <div class="example-label">Example:</div>
+                curl -X POST "http://localhost:5050/api/snippets/analyze?quality_threshold=30"
+            </div>
+        </div>
+        
+        <div class="endpoint">
+            <div class="endpoint-header">
+                <span class="method get">GET</span>
+                <span class="endpoint-path">/api/snippets/stats</span>
+            </div>
+            <div class="endpoint-desc">
+                Statistics on snippet extraction: efficiency metrics, quality distribution.
+            </div>
+            <div class="example">
+                <div class="example-label">Example:</div>
+                curl http://localhost:5050/api/snippets/stats
+            </div>
+        </div>
+        
+        <div class="highlight-box">
+            <h3>Common Patterns</h3>
+            <p><strong>Dry Run:</strong> Most POST endpoints default to <code>dry_run=true</code> for preview.</p>
+            <p><strong>Backups:</strong> File operations auto-create backups unless disabled.</p>
+            <p><strong>Quality:</strong> 80+ = memoir gold, 50+ = medium, &lt;20 = low.</p>
+        </div>
+        
+        <div style="margin-top: 40px; padding-top: 20px; border-top: 2px solid rgba(79, 158, 255, 0.3); text-align: center; opacity: 0.7;">
+            <p>Flatline Codex API - Base: <code>http://localhost:5050</code></p>
+        </div>
+    </div>
+</body>
+</html>"""
+    return HTMLResponse(content=html_content)
+
+@router.get("/review", response_class=HTMLResponse)
+async def serve_review_interface():
+    """Serve the chunk review interface"""
+    # Use a raw string to avoid escape issues
+    return HTMLResponse(content=open('app/static/review.html').read())
+
+@router.get("/api/inload/mining-dashboard")
+async def get_mining_dashboard(format: str = "json"):
+    """Get comprehensive dashboard of _inload mining status"""
+    from .content_mining import InloadContentMiner
+    
+    try:
+        # Scan current content
+        miner = InloadContentMiner(VAULT_PATH)
+        miner.scan_all_inload_content()
+        miner.classify_content()
+        
+        # Find snippet-tagged files
+        snippet_files = []
+        total_ai_collaboration = len(miner.mining_results["ai_collaboration"])
+        
+        for file_path, signature in miner.content_signatures.items():
+            if signature.get('file_path') and miner.is_snippet_file_by_signature(signature):
+                snippet_files.append({
+                    "file": file_path,
+                    "quality": signature["quality_score"],
+                    "theme": signature["dominant_theme"],
+                    "word_count": signature["word_count"]
+                })
+        
+        # Calculate statistics
+        if snippet_files:
+            qualities = [f["quality"] for f in snippet_files]
+            avg_quality = sum(qualities) / len(qualities)
+            high_quality_count = len([q for q in qualities if q >= 20])
+            total_words = sum(f["word_count"] for f in snippet_files)
+        else:
+            avg_quality = 0
+            high_quality_count = 0
+            total_words = 0
+        
+        # Calculate metrics
+        total_files = len(miner.content_signatures)
+        total_words_all = sum(sig['word_count'] for sig in miner.content_signatures.values())
+        
+        # Quality distribution
+        quality_distribution = defaultdict(int)
+        for sig in miner.content_signatures.values():
+            quality_range = f"{int(sig['quality_score'])}-{int(sig['quality_score'])+1}"
+            quality_distribution[quality_range] += 1
+        
+        # Theme distribution
+        theme_distribution = defaultdict(int)
+        for sig in miner.content_signatures.values():
+            theme_distribution[sig['dominant_theme']] += 1
+        
+        # Calculate processing recommendations
+        high_priority_count = len(miner.mining_results["high_value"]) + len(miner.mining_results["memoir_gold"])
+        medium_priority_count = len(miner.mining_results["recovery_threads"]) + len(miner.mining_results["job_survival"])
+        archive_candidate_count = len(miner.mining_results["archive_candidates"])
+        
+        # Build response data
+        response_data = {
+            "status": "success",
+            "overview": {
+                "total_files": total_files,
+                "total_words": total_words_all,
+                "avg_quality": round(sum(sig['quality_score'] for sig in miner.content_signatures.values()) / total_files, 2) if total_files > 0 else 0
+            },
+            "distributions": {
+                "quality": dict(quality_distribution),
+                "themes": dict(theme_distribution)
+            },
+            "processing_recommendations": {
+                "high_priority": high_priority_count,
+                "medium_priority": medium_priority_count,
+                "archive_candidates": archive_candidate_count,
+                "processing_order": [
+                    f"1. Review {high_priority_count} high-priority files first",
+                    f"2. Process {medium_priority_count} medium-priority files",
+                    f"3. Consider archiving {archive_candidate_count} low-quality files"
+                ]
+            },
+            "classifications": {
+                category: len(files)
+                for category, files in miner.mining_results.items()
+            }
+        }
+        
+        # Return HTML if requested
+        if format.lower() == "html":
+            return HTMLResponse(content=generate_mining_dashboard_html(response_data))
+        
+        # Default JSON response
+        return response_data
+        
+    except Exception as e:
+        error_response = {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to generate mining dashboard"
+        }
+        if format.lower() == "html":
+            return HTMLResponse(content=f"<html><body><h1>Error</h1><p>{str(e)}</p></body></html>")
+        return error_response
+
+
+def generate_mining_dashboard_html(data: dict) -> str:
+    """Generate HTML visualization of mining dashboard data"""
+    
+    overview = data["overview"]
+    distributions = data["distributions"]
+    processing = data["processing_recommendations"]
+    classifications = data["classifications"]
+    
+    # Generate quality distribution chart data
+    quality_items = sorted(distributions["quality"].items(), key=lambda x: int(x[0].split('-')[0]))
+    quality_chart_html = ""
+    max_quality_count = max(distributions["quality"].values()) if distributions["quality"] else 1
+    
+    for quality_range, count in quality_items[:20]:  # Show top 20 ranges
+        percentage = (count / max_quality_count) * 100
+        quality_chart_html += f"""
+        <div class="chart-row">
+            <div class="chart-label">{quality_range}</div>
+            <div class="chart-bar-container">
+                <div class="chart-bar" style="width: {percentage}%"></div>
+                <span class="chart-value">{count}</span>
+            </div>
+        </div>
+        """
+    
+    # Generate theme distribution
+    theme_colors = {
+        "ai_collaboration": "#4f9eff",
+        "survival": "#ffd93d",
+        "recovery": "#6bcf7f",
+        "creative": "#a78bfa",
+        "technical": "#ff6b6b",
+        "emotional": "#ff9f68",
+        "memoir": "#fc85ae",
+        "unclear": "#888888"
+    }
+    
+    theme_chart_html = ""
+    max_theme_count = max(distributions["themes"].values()) if distributions["themes"] else 1
+    
+    for theme, count in sorted(distributions["themes"].items(), key=lambda x: x[1], reverse=True):
+        percentage = (count / max_theme_count) * 100
+        color = theme_colors.get(theme, "#999999")
+        theme_chart_html += f"""
+        <div class="chart-row">
+            <div class="chart-label">{theme.replace('_', ' ').title()}</div>
+            <div class="chart-bar-container">
+                <div class="chart-bar" style="width: {percentage}%; background: {color};"></div>
+                <span class="chart-value">{count}</span>
+            </div>
+        </div>
+        """
+    
+    # Generate classification cards
+    classification_cards_html = ""
+    classification_colors = {
+        "high_value": "#6bcf7f",
+        "memoir_gold": "#fc85ae",
+        "recovery_threads": "#4f9eff",
+        "job_survival": "#ffd93d",
+        "ai_collaboration": "#a78bfa",
+        "creative_fragments": "#ff9f68",
+        "archive_candidates": "#888888"
+    }
+    
+    for category, count in classifications.items():
+        color = classification_colors.get(category, "#999999")
+        display_name = category.replace('_', ' ').title()
+        classification_cards_html += f"""
+        <div class="stat-card" style="border-color: {color};">
+            <div class="stat-value" style="color: {color};">{count}</div>
+            <div class="stat-label">{display_name}</div>
+        </div>
+        """
+    
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>_inload Mining Dashboard</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            color: #e0e0e0;
+            padding: 20px;
+            line-height: 1.6;
+        }}
+        .container {{
+            max-width: 1400px;
+            margin: 0 auto;
+        }}
+        header {{
+            text-align: center;
+            padding: 30px 0;
+            background: rgba(0,0,0,0.3);
+            border-radius: 12px;
+            margin-bottom: 30px;
+            border: 2px solid rgba(79, 158, 255, 0.3);
+        }}
+        h1 {{
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #4f9eff, #ff6b6b, #ffd93d);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }}
+        .subtitle {{
+            font-size: 1.1em;
+            opacity: 0.8;
+        }}
+        .overview-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }}
+        .overview-card {{
+            background: rgba(0,0,0,0.3);
+            padding: 25px;
+            border-radius: 12px;
+            border: 2px solid rgba(79, 158, 255, 0.2);
+        }}
+        .overview-value {{
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #4f9eff;
+            margin-bottom: 5px;
+        }}
+        .overview-label {{
+            opacity: 0.7;
+            font-size: 1em;
+        }}
+        .section {{
+            background: rgba(0,0,0,0.3);
+            padding: 25px;
+            border-radius: 12px;
+            border: 2px solid rgba(79, 158, 255, 0.2);
+            margin-bottom: 30px;
+        }}
+        .section h2 {{
+            color: #4f9eff;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid rgba(79, 158, 255, 0.3);
+        }}
+        .chart-row {{
+            display: flex;
+            align-items: center;
+            margin-bottom: 12px;
+        }}
+        .chart-label {{
+            width: 100px;
+            font-family: 'Monaco', monospace;
+            font-size: 0.9em;
+            color: #ffd93d;
+        }}
+        .chart-bar-container {{
+            flex: 1;
+            position: relative;
+            height: 30px;
+            background: rgba(255,255,255,0.05);
+            border-radius: 4px;
+            overflow: hidden;
+        }}
+        .chart-bar {{
+            height: 100%;
+            background: linear-gradient(90deg, #4f9eff, #6bcf7f);
+            transition: width 0.3s ease;
+            border-radius: 4px;
+        }}
+        .chart-value {{
+            position: absolute;
+            right: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-weight: bold;
+            color: white;
+            font-size: 0.9em;
+        }}
+        .classifications-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+        }}
+        .stat-card {{
+            background: rgba(0,0,0,0.4);
+            padding: 20px;
+            border-radius: 12px;
+            border: 2px solid;
+            text-align: center;
+        }}
+        .stat-value {{
+            font-size: 2.5em;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }}
+        .stat-label {{
+            opacity: 0.8;
+            font-size: 0.95em;
+        }}
+        .processing-steps {{
+            background: rgba(255, 215, 61, 0.1);
+            border-left: 4px solid #ffd93d;
+            padding: 20px;
+            border-radius: 8px;
+        }}
+        .processing-steps ol {{
+            margin-left: 20px;
+            margin-top: 10px;
+        }}
+        .processing-steps li {{
+            margin-bottom: 8px;
+            color: #e0e0e0;
+        }}
+        .api-link {{
+            text-align: center;
+            margin-top: 30px;
+            padding: 20px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+        }}
+        .api-link a {{
+            color: #4f9eff;
+            text-decoration: none;
+            font-family: 'Monaco', monospace;
+        }}
+        .api-link a:hover {{
+            color: #6bcf7f;
+            text-decoration: underline;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📊 _inload Mining Dashboard</h1>
+            <p class="subtitle">Content Analysis & Processing Recommendations</p>
+        </header>
+        
+        <div class="overview-grid">
+            <div class="overview-card">
+                <div class="overview-value">{overview['total_files']:,}</div>
+                <div class="overview-label">Total Files Scanned</div>
+            </div>
+            <div class="overview-card">
+                <div class="overview-value">{overview['total_words']:,}</div>
+                <div class="overview-label">Total Words</div>
+            </div>
+            <div class="overview-card">
+                <div class="overview-value">{overview['avg_quality']:.1f}</div>
+                <div class="overview-label">Average Quality Score</div>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>Content Classifications</h2>
+            <div class="classifications-grid">
+                {classification_cards_html}
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>Processing Recommendations</h2>
+            <div class="processing-steps">
+                <strong>Recommended Processing Order:</strong>
+                <ol>
+                    {''.join(f'<li>{step.split(". ", 1)[1]}</li>' for step in processing['processing_order'])}
+                </ol>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>Theme Distribution</h2>
+            {theme_chart_html}
+        </div>
+        
+        <div class="section">
+            <h2>Quality Score Distribution (Top 20 Ranges)</h2>
+            {quality_chart_html}
+        </div>
+        
+        <div class="api-link">
+            <p>View JSON data: <a href="/api/inload/mining-dashboard?format=json">/api/inload/mining-dashboard?format=json</a></p>
+            <p style="margin-top: 10px;">Return to: <a href="/">API Documentation</a></p>
+        </div>
+    </div>
+</body>
+</html>"""
+    
+    return html_content
