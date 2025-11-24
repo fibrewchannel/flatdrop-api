@@ -1452,6 +1452,7 @@ async def get_training_batches():
     except Exception as e:
         return {"error": f"Failed to load batch information: {str(e)}"}
 
+
 @router.get("/api/training/batch/{batch_id}")
 async def get_batch_details(batch_id: str):
     """Get detailed information about a specific batch"""
@@ -4405,6 +4406,41 @@ async def scan_inload_content():
 # Add these endpoints to your app/routes.py file
 # Insert after the training endpoints section
 
+def generate_smart_tags(chunk: dict) -> list:
+    """Generate intelligent tags based on chunk analysis"""
+    tags = []
+    coords = chunk.get('coordinates', {})
+    theme = chunk.get('theme', '')
+    patterns = chunk.get('patterns', {})
+    
+    # Add coordinate tags
+    if coords.get('x_structure'):
+        tags.append(f"x-structure/{coords['x_structure']}")
+    if coords.get('y_transmission'):
+        tags.append(f"y-transmission/{coords['y_transmission']}")
+    if coords.get('z_purpose'):
+        tags.append(f"z-purpose/{coords['z_purpose']}")
+    if coords.get('w_terrain'):
+        tags.append(f"w-terrain/{coords['w_terrain']}")
+    
+    # Add theme tag
+    if theme and theme != 'unknown':
+        tags.append(f"theme/{theme}")
+    
+    # Add content-based tags
+    if patterns.get('memoir_markers', 0) > 3:
+        tags.append('memoir-gold')
+    if patterns.get('recovery_markers', 0) > 2:
+        tags.append('recovery')
+    if patterns.get('medical_markers', 0) > 2:
+        tags.append('medical')
+    if patterns.get('ai_markers', 0) > 2:
+        tags.append('ai-collaboration')
+    if patterns.get('emotional_markers', 0) > 3:
+        tags.append('emotional-depth')
+    
+    return tags
+
 @router.post("/api/chunks/create-review-queue")
 async def create_review_queue():
     """
@@ -5628,6 +5664,99 @@ async def serve_review_interface():
     """Serve the chunk review interface"""
     # Use a raw string to avoid escape issues
     return HTMLResponse(content=open('app/static/review.html').read())
+
+# Helper functions for review queue
+def calculate_review_priority(chunk: dict) -> float:
+    """Calculate review priority for a chunk"""
+    quality = chunk.get('quality_score', 0)
+    patterns = chunk.get('patterns', {})
+    coords = chunk.get('coordinates', {})
+    
+    priority = 0.0
+    
+    # High quality = high priority
+    if quality >= 80:
+        priority += 0.4
+    elif quality >= 50:
+        priority += 0.2
+    
+    # Strong patterns = worth reviewing
+    pattern_strength = sum(patterns.values())
+    if pattern_strength > 10:
+        priority += 0.3
+    elif pattern_strength > 5:
+        priority += 0.2
+    
+    # Recovery/memoir focused = important
+    if patterns.get('recovery_markers', 0) > 2:
+        priority += 0.2
+    if patterns.get('memoir_markers', 0) > 2:
+        priority += 0.2
+    
+    # Story-focused purpose
+    if coords.get('z_purpose') == 'tell-story':
+        priority += 0.1
+    
+    return min(1.0, priority)
+
+def get_review_reason(chunk: dict) -> list:
+    """Generate reasons why this chunk needs review"""
+    reasons = []
+    quality = chunk.get('quality_score', 0)
+    patterns = chunk.get('patterns', {})
+    coords = chunk.get('coordinates', {})
+    
+    if quality >= 80:
+        reasons.append("High memoir potential (quality 80+)")
+    
+    if coords.get('z_purpose') == 'tell-story':
+        reasons.append("Story-focused content")
+    
+    if patterns.get('memoir_markers', 0) > 3:
+        reasons.append("Strong memoir markers detected")
+    
+    if patterns.get('recovery_markers', 0) > 2:
+        reasons.append("Recovery narrative content")
+    
+    if 50 <= quality < 80:
+        reasons.append("Borderline quality - needs decision")
+    
+    if not reasons:
+        reasons.append("Standard review")
+    
+    return reasons
+
+def suggest_chunk_destination(coords: dict, quality: float) -> str:
+    """Suggest where a chunk should be filed"""
+    z_purpose = coords.get('z_purpose', 'tell-story')
+    x_structure = coords.get('x_structure', 'archetype')
+    
+    # Map purpose to base folder
+    purpose_folders = {
+        'tell-story': 'memoir',
+        'help-addict': 'recovery',
+        'prevent-death-poverty': 'survival',
+        'financial-amends': 'work-amends',
+        'help-world': 'contribution'
+    }
+    
+    base = purpose_folders.get(z_purpose, 'memoir')
+    
+    # High quality memoir goes to spine
+    if quality >= 80 and z_purpose == 'tell-story':
+        return f"{base}/spine/foundations"
+    
+    # Otherwise organize by structure
+    structure_folders = {
+        'archetype': 'personas',
+        'protocol': 'practices',
+        'shadowcast': 'explorations',
+        'expansion': 'context',
+        'summoning': 'activations'
+    }
+    
+    subfolder = structure_folders.get(x_structure, 'general')
+    return f"{base}/{subfolder}"
 
 @router.get("/api/inload/mining-dashboard")
 async def get_mining_dashboard(format: str = "json"):
