@@ -4441,6 +4441,21 @@ def generate_smart_tags(chunk: dict) -> list:
     
     return tags
 
+def calculate_tagging_confidence(chunk: dict) -> float:
+    """Calculate confidence in auto-tagging suggestions"""
+    patterns = chunk.get('patterns', {})
+    quality = chunk.get('quality_score', 0)
+    
+    # High quality + strong patterns = high confidence
+    pattern_strength = sum(patterns.values())
+    pattern_score = min(pattern_strength / 20, 1.0)  # Normalize to 0-1
+    quality_score = min(quality / 100, 1.0)
+    
+    # Weighted combination
+    confidence = (pattern_score * 0.4) + (quality_score * 0.6)
+    
+    return round(confidence, 2)
+
 @router.post("/api/chunks/create-review-queue")
 async def create_review_queue():
     """
@@ -4490,7 +4505,7 @@ async def create_review_queue():
         'low_priority': len([x for x in review_queue if x['priority'] < 0.5]),
         'queue_file': str(queue_file)
     }
-@router.get("/api/chunks/review-queue")
+    @router.get("/api/chunks/review-queue")
 async def get_review_queue(
     priority_filter: str = "all",  # all, critical, high, medium, low
     limit: int = 50
