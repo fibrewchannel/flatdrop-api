@@ -26,7 +26,7 @@ Bash orchestrator that triggers a full multi-stage ingestion + processing pipeli
 Processes only new or changed files from `_inload/`.
 - Hash-check or mtime based diff
 - Supports dry-run mode
-
+   
 ### `single_file_tester.py`
 Run the coordinate pipeline on one `.md` file.
 - CLI usage: `python single_file_tester.py /path/to/file.md`
