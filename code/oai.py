@@ -2,7 +2,7 @@ import openai
 import requests
 
 # Set this to your actual OpenAI key
-openai.api_key = "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"
+openai.api_key = ""
 
 # Construct the GitHub raw URL
 url = "https://raw.githubusercontent.com/fibrewchannel/flatline-codex/gh-pages/_inload/docs/recovery/share_draft_hope_section.md"
