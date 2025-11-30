@@ -1,13 +1,9 @@
-*.pyc
 .DS_Store
 *.pyc
-*.pyc
+.env
 /tmp
 /venv
 code/.DS_Store
 /code/app/__pycache__
-/code/app/__pycache__
-/code/app/__pycache__
-code/oai.py
 ingest_github_markdown.py
 code/oai.py

@@ -1,8 +1,16 @@
 import openai
 import requests
-  
-# Set this to your actual OpenAI key
-openai.api_key = "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"
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Get API key from environment
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
+if not openai.api_key:
+    raise ValueError("OPENAI_API_KEY not found in environment variables. Check your .env file.")
 
 # Construct the GitHub raw URL
 url = "https://raw.githubusercontent.com/fibrewchannel/flatline-codex/gh-pages/_inload/docs/recovery/share_draft_hope_section.md"
