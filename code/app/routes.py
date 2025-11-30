@@ -4505,7 +4505,8 @@ async def create_review_queue():
         'low_priority': len([x for x in review_queue if x['priority'] < 0.5]),
         'queue_file': str(queue_file)
     }
-    @router.get("/api/chunks/review-queue")
+
+@router.get("/api/chunks/review-queue")
 async def get_review_queue(
     priority_filter: str = "all",  # all, critical, high, medium, low
     limit: int = 50

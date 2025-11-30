@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔍 Chunk Review Station</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            color: #fff;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        header {
+            text-align: center;
+            padding: 30px 0;
+            background: rgba(0,0,0,0.3);
+            border-radius: 12px;
+            margin-bottom: 30px;
+            border: 2px solid rgba(79, 158, 255, 0.3);
+        }
+        
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            background: linear-gradient(90deg, #ff6b6b, #4f9eff, #6bcf7f);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            background: rgba(0,0,0,0.3);
+            padding: 20px;
+            border-radius: 12px;
+            align-items: center;
+        }
+        
+        .filter-group {
+            flex: 1;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #4f9eff;
+        }
+        
+        select, input {
+            width: 100%;
+            padding: 10px;
+            border: 2px solid rgba(79, 158, 255, 0.3);
+            background: rgba(0,0,0,0.5);
+            color: #fff;
+            border-radius: 8px;
+            font-size: 1em;
+        }
+        
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            font-weight: bold;
+            font-size: 1em;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #4f9eff, #6bcf7f);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(79, 158, 255, 0.4);
+        }
+        
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 2px solid rgba(79, 158, 255, 0.3);
+        }
+        
+        .status {
+            background: rgba(0,0,0,0.3);
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #4f9eff;
+        }
+        
+        .chunk-list {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .chunk-card {
+            background: rgba(0,0,0,0.3);
+            border: 2px solid rgba(79, 158, 255, 0.2);
+            border-radius: 12px;
+            padding: 20px;
+            transition: all 0.3s;
+        }
+        
+        .chunk-card:hover {
+            border-color: #4f9eff;
+            transform: translateY(-2px);
+        }
+        
+        .chunk-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid rgba(79, 158, 255, 0.2);
+        }
+        
+        .quality-badge {
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+        
+        .quality-high { background: #6bcf7f; color: #000; }
+        .quality-medium { background: #ffd93d; color: #000; }
+        .quality-low { background: #ff6b6b; color: #fff; }
+        
+        .chunk-content {
+            background: rgba(0,0,0,0.3);
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            max-height: 200px;
+            overflow-y: auto;
+            line-height: 1.6;
+        }
+        
+        .chunk-metadata {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .metadata-item {
+            background: rgba(255, 255, 255, 0.05);
+            padding: 10px;
+            border-radius: 6px;
+        }
+        
+        .metadata-label {
+            color: #4f9eff;
+            font-size: 0.85em;
+            margin-bottom: 4px;
+        }
+        
+        .metadata-value {
+            font-family: 'Monaco', monospace;
+            font-size: 0.9em;
+        }
+        
+        .suggestions {
+            background: rgba(79, 158, 255, 0.1);
+            border-left: 4px solid #4f9eff;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+        }
+        
+        .suggestions h4 {
+            color: #4f9eff;
+            margin-bottom: 10px;
+        }
+        
+        .tag-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        
+        .tag {
+            background: rgba(79, 158, 255, 0.2);
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            border: 1px solid rgba(79, 158, 255, 0.3);
+        }
+        
+        .actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+        
+        .error {
+            background: rgba(255, 107, 107, 0.2);
+            border: 2px solid #ff6b6b;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 40px;
+            font-size: 1.2em;
+            color: #4f9eff;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔍 Chunk Review Station</h1>
+            <p>AI-assisted review of extracted training chunks</p>
+        </header>
+        
+        <div class="controls">
+            <div class="filter-group">
+                <label>Priority Filter</label>
+                <select id="priority-filter">
+                    <option value="high">High (60-80%)</option>
+                    <option value="medium">Medium (40-60%)</option>
+                    <option value="low">Low (20-40%)</option>
+                    <option value="all">All Priorities</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label>Batch Size</label>
+                <select id="batch-size">
+                    <option value="5">5 chunks</option>
+                    <option value="10" selected>10 chunks</option>
+                    <option value="20">20 chunks</option>
+                    <option value="50">50 chunks</option>
+                </select>
+            </div>
+            
+            <div class="filter-group" style="display: flex; align-items: flex-end;">
+                <button class="btn-primary" onclick="loadBatch()">Load Review Batch</button>
+            </div>
+            
+            <div class="filter-group" style="display: flex; align-items: flex-end;">
+                <button class="btn-secondary" onclick="viewStats()">View Queue Stats</button>
+            </div>
+        </div>
+        
+        <div id="status" class="status" style="display: none;"></div>
+        <div id="error" class="error" style="display: none;"></div>
+        <div id="loading" class="loading" style="display: none;">Loading chunks...</div>
+        <div id="chunk-list" class="chunk-list"></div>
+    </div>
+    
+    <script>
+        let currentBatch = [];
+        
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            setTimeout(() => errorDiv.style.display = 'none', 5000);
+        }
+        
+        function showStatus(message) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.style.display = 'block';
+        }
+        
+        async function loadBatch() {
+            const priority = document.getElementById('priority-filter').value;
+            const batchSize = document.getElementById('batch-size').value;
+            
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('chunk-list').innerHTML = '';
+            document.getElementById('error').style.display = 'none';
+            
+            try {
+                const response = await fetch(`/api/chunks/review-batch?batch_size=${batchSize}&priority_filter=${priority}`);
+                const data = await response.json();
+                
+                document.getElementById('loading').style.display = 'none';
+                
+                if (data.status === 'error') {
+                    showError(data.message || 'Failed to load batch');
+                    return;
+                }
+                
+                currentBatch = data.chunks || [];
+                
+                if (currentBatch.length === 0) {
+                    showStatus('No chunks found in this priority range. Try a different filter.');
+                    return;
+                }
+                
+                showStatus(`Loaded ${currentBatch.length} chunks. ${data.remaining_in_filter} remaining in ${priority} priority.`);
+                renderChunks(currentBatch);
+                
+            } catch (error) {
+                document.getElementById('loading').style.display = 'none';
+                showError('Failed to load batch: ' + error.message);
+            }
+        }
+        
+        function renderChunks(chunks) {
+            const container = document.getElementById('chunk-list');
+            container.innerHTML = '';
+            
+            chunks.forEach((chunk, index) => {
+                const card = createChunkCard(chunk, index);
+                container.appendChild(card);
+            });
+        }
+        
+        function createChunkCard(chunk, index) {
+            const card = document.createElement('div');
+            card.className = 'chunk-card';
+            
+            const quality = chunk.quality_score || 0;
+            const qualityClass = quality >= 70 ? 'quality-high' : quality >= 40 ? 'quality-medium' : 'quality-low';
+            const qualityLabel = quality >= 70 ? 'High Quality' : quality >= 40 ? 'Medium Quality' : 'Low Quality';
+            
+            const coords = chunk.coordinates || {};
+            const reasons = Array.isArray(chunk.review_reason) ? chunk.review_reason : [chunk.review_reason || 'Standard review'];
+            
+            card.innerHTML = `
+                <div class="chunk-header">
+                    <div>
+                        <strong>Chunk #${index + 1}</strong>
+                        <span style="opacity: 0.7; margin-left: 10px; font-family: Monaco; font-size: 0.85em;">${chunk.chunk_id || 'unknown'}</span>
+                    </div>
+                    <div class="quality-badge ${qualityClass}">
+                        ${quality.toFixed(1)} - ${qualityLabel}
+                    </div>
+                </div>
+                
+                <div class="chunk-metadata">
+                    <div class="metadata-item">
+                        <div class="metadata-label">Theme</div>
+                        <div class="metadata-value">${chunk.theme || 'unknown'}</div>
+                    </div>
+                    <div class="metadata-item">
+                        <div class="metadata-label">Purpose (Z)</div>
+                        <div class="metadata-value">${coords.z_purpose || 'unknown'}</div>
+                    </div>
+                    <div class="metadata-item">
+                        <div class="metadata-label">Structure (X)</div>
+                        <div class="metadata-value">${coords.x_structure || 'unknown'}</div>
+                    </div>
+                    <div class="metadata-item">
+                        <div class="metadata-label">Word Count</div>
+                        <div class="metadata-value">${chunk.word_count || 0}</div>
+                    </div>
+                </div>
+                
+                <div style="margin-bottom: 15px;">
+                    <strong style="color: #ffd93d;">Review Reasons:</strong>
+                    <ul style="margin-left: 20px; margin-top: 5px;">
+                        ${reasons.map(r => `<li>${r}</li>`).join('')}
+                    </ul>
+                </div>
+                
+                <div class="chunk-content">
+                    ${(chunk.content || 'No content available').substring(0, 500)}${chunk.content && chunk.content.length > 500 ? '...' : ''}
+                </div>
+                
+                <div class="suggestions">
+                    <h4>AI Suggestions (Confidence: ${((chunk.tagging_confidence || 0) * 100).toFixed(0)}%)</h4>
+                    <div style="margin-bottom: 10px;">
+                        <strong>Suggested Destination:</strong> ${chunk.suggested_destination || 'Not specified'}
+                    </div>
+                    <div>
+                        <strong>Suggested Tags:</strong>
+                        <div class="tag-list">
+                            ${(chunk.suggested_tags || []).map(tag => `<span class="tag">${tag}</span>`).join('')}
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="actions">
+                    <button class="btn-primary" onclick="approveChunk(${index})">✓ Approve</button>
+                    <button class="btn-secondary" onclick="modifyChunk(${index})">✎ Modify</button>
+                    <button class="btn-secondary" onclick="rejectChunk(${index})" style="border-color: #ff6b6b; color: #ff6b6b;">✗ Reject</button>
+                </div>
+            `;
+            
+            return card;
+        }
+        
+        function approveChunk(index) {
+            const chunk = currentBatch[index];
+            console.log('Approved:', chunk.chunk_id);
+            showStatus(`Approved chunk: ${chunk.chunk_id}`);
+            // TODO: Send approval to backend
+        }
+        
+        function modifyChunk(index) {
+            const chunk = currentBatch[index];
+            console.log('Modify:', chunk.chunk_id);
+            showStatus(`Modify feature coming soon for: ${chunk.chunk_id}`);
+            // TODO: Open modify dialog
+        }
+        
+        function rejectChunk(index) {
+            const chunk = currentBatch[index];
+            console.log('Rejected:', chunk.chunk_id);
+            showStatus(`Rejected chunk: ${chunk.chunk_id}`);
+            // TODO: Send rejection to backend
+        }
+        
+        async function viewStats() {
+            try {
+                const response = await fetch('/api/chunks/review-stats');
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    const statsMessage = `
+                        Total: ${data.total_items}
+                        Critical: ${data.by_priority.critical}
+                        High: ${data.by_priority.high}
+                        Medium: ${data.by_priority.medium}
+                        Low: ${data.by_priority.low}
+                        
+                        Memoir Gold: ${data.quality_stats.memoir_gold}
+                        Avg Quality: ${data.quality_stats.average}
+                    `;
+                    alert(statsMessage);
+                } else {
+                    showError('Failed to load stats');
+                }
+            } catch (error) {
+                showError('Failed to load stats: ' + error.message);
+            }
+        }
+        
+        // Auto-load on page load
+        window.addEventListener('load', () => {
+            loadBatch();
+        });
+    </script>
+</body>
+</html>

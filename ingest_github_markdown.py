@@ -4,7 +4,7 @@ import json
 import yaml
 import os
 from openai import OpenAI
-
+  
 # 🔐 Use env var or hardcode your key
 api_key = os.getenv("OPENAI_API_KEY", "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")
 client = OpenAI(api_key=api_key)

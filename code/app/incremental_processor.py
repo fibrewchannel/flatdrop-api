@@ -10,8 +10,16 @@ from datetime import datetime
 from typing import Set, Dict, Any
 import shutil
 
+# Check if RTF support is available
+try:
+    from striprtf.striprtf import rtf_to_text
+    RTF_AVAILABLE = True
+except ImportError:
+    RTF_AVAILABLE = False
+    print("⚠️  Warning: RTF support not available (install striprtf if needed)")
+
 # Import the existing production nibbler
-from production_relocation_nibbler import ProductionRelocationNibbler, RTF_AVAILABLE
+from training_nibbler import TrainingNibbler
 
 # CONFIGURATION
 SOURCE_DIR = "/Users/rickshangle/Vaults/flatline-codex/_inload"
@@ -29,15 +37,20 @@ class IncrementalProcessor:
         self.log_file = Path(log_file)
         self.archive_dir = self.output_base / "_archive" / "processed-sources"
         
-        # Initialize the nibbler
-        self.nibbler = ProductionRelocationNibbler(source_dir, output_base, backup_dir)
+        # Use TrainingNibbler for unified output
+        self.nibbler = TrainingNibbler(source_dir, str(self.output_base / "_training_output"))
         
         # Load processed files log
         self.processed_files = self.load_processed_log()
         
         # Setup archive directory
         self.archive_dir.mkdir(parents=True, exist_ok=True)
-    
+        
+        # Track current batch number
+        training_output = Path(self.output_base) / "_training_output" / "batch_outputs"
+        existing_batches = list(training_output.glob("batch_*")) if training_output.exists() else []
+        self.current_batch_id = len(existing_batches) + 1
+
     def load_processed_log(self) -> Dict[str, Dict[str, Any]]:
         """Load log of previously processed files"""
         if not self.log_file.exists():
@@ -165,40 +178,29 @@ class IncrementalProcessor:
         backup_path = self.nibbler.create_backup()
         
         # Process new files in batches
+        # Process new files in batches using TrainingNibbler
         print(f"\n⚙️ Processing {len(new_files)} new files...")
         batch_size = 10
-        batch_id = 1
-        all_results = []
-        
+
         for i in range(0, len(new_files), batch_size):
             batch_files = new_files[i:i + batch_size]
-            print(f"\nProcessing Batch {batch_id}: {len(batch_files)} files")
+            print(f"\nProcessing Batch {self.current_batch_id}: {len(batch_files)} files")
             
-            batch_results = []
+            # Use TrainingNibbler to process batch
+            batch_summary = self.nibbler.process_batch(batch_files, self.current_batch_id)
+            
+            # Mark files as processed and archive
             for file_path in batch_files:
-                # Process the file
-                result = self.nibbler.process_single_file(file_path, dry_run=False)
-                batch_results.append(result)
-                
-                # Calculate disposition summary
-                disposition_summary = {}
-                for chunk in result.get("chunks", []):
-                    dispo = chunk["disposition"]
-                    disposition_summary[dispo] = disposition_summary.get(dispo, 0) + 1
-                
-                # Mark as processed
                 processing_info = {
-                    "chunks_extracted": result["chunks_extracted"],
-                    "disposition_summary": disposition_summary
+                    "chunks_extracted": batch_summary.get("total_chunks_extracted", 0) // len(batch_files),
+                    "batch_id": self.current_batch_id
                 }
                 self.mark_as_processed(file_path, processing_info)
                 
                 # Archive the source file
                 self.archive_source_file(file_path)
             
-            all_results.extend(batch_results)
-            batch_id += 1
-        
+            self.current_batch_id += 1
         # Archive already-processed files (if they weren't already moved)
         if already_processed:
             print(f"\n📦 Archiving {len(already_processed)} already-processed files...")
@@ -210,19 +212,16 @@ class IncrementalProcessor:
         self.save_processed_log()
         
         # Calculate final statistics
-        total_chunks = sum(r["chunks_extracted"] for r in all_results)
-        total_dispositions = {
-            "memoir-grade": 0,
-            "promising": 0,
-            "borderline": 0,
-            "trash": 0
-        }
-        
-        for result in all_results:
-            for chunk in result.get("chunks", []):
-                dispo = chunk["disposition"]
-                total_dispositions[dispo] += 1
-        
+        # Calculate final statistics from saved batch outputs
+        training_output = Path(self.output_base) / "_training_output" / "batch_outputs"
+        total_chunks = 0
+
+        for batch_dir in training_output.glob("batch_*"):
+            stats_file = batch_dir / "batch_stats.json"
+            if stats_file.exists():
+                with open(stats_file, 'r') as f:
+                    stats = json.load(f)
+                    total_chunks += stats.get("total_chunks_extracted", 0)
         summary = {
             "new_files_processed": len(new_files),
             "new_files_by_type": new_by_type,
@@ -247,11 +246,10 @@ class IncrementalProcessor:
         print(f"  - .rtf: {new_by_type['.rtf']}")
         print(f"Already-processed archived: {len(already_processed)}")
         print(f"Total chunks extracted: {total_chunks}")
-        print(f"\nDisposition breakdown:")
-        print(f"  Memoir-grade: {total_dispositions['memoir-grade']}")
-        print(f"  Promising: {total_dispositions['promising']}")
-        print(f"  Borderline: {total_dispositions['borderline']}")
-        print(f"  Trash: {total_dispositions['trash']}")
+        print(f"\nTotal chunks extracted: {total_chunks}")
+        print(f"Chunks saved to: {training_output}")
+        print(f"\n✨ Next step: Rebuild review queue to include new chunks:")
+        print(f"   curl -X POST http://localhost:5050/api/chunks/create-review-queue")
         print(f"\n📁 _inload/ is now empty (all sources archived)")
         print(f"💾 Backup: {backup_path}")
         
